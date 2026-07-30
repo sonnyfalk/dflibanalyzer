@@ -1,6 +1,7 @@
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
+use std::ffi::OsString;
 use std::fs::*;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use clap::Parser;
 use ini::*;
@@ -170,6 +171,53 @@ impl Workspace {
         }
         workspaces
     }
+
+    fn all_source_files(&self) -> Vec<PathBuf> {
+        let mut result = Vec::new();
+        for dir in self.appsrc_path.iter().chain(self.ddsrc_path.iter()) {
+            collect_source_files(dir, &mut result);
+        }
+        result
+    }
+}
+
+fn collect_source_files(dir: &Path, result: &mut Vec<PathBuf>) {
+    let Ok(entries) = read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_source_files(&path, result);
+        } else if path
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .is_some_and(|ext| {
+                matches!(
+                    ext,
+                    "pkg" | "vw" | "wo" | "sl" | "dd" | "src" | "dg" | "bp" | "rv" | "fd" | "inc"
+                )
+            })
+        {
+            result.push(path);
+        }
+    }
+}
+
+fn map_source_files_to_workspaces<'a>(
+    workspaces: impl IntoIterator<Item = &'a Workspace>,
+) -> HashMap<OsString, Vec<&'a Workspace>> {
+    let mut map: HashMap<OsString, Vec<&'a Workspace>> = HashMap::new();
+    for workspace in workspaces {
+        for source_file in workspace.all_source_files() {
+            if let Some(file_name) = source_file.file_name() {
+                map.entry(file_name.to_os_string())
+                    .or_default()
+                    .push(workspace);
+            }
+        }
+    }
+    map
 }
 
 fn main() -> Result<(), String> {
@@ -179,6 +227,19 @@ fn main() -> Result<(), String> {
 
     let libraries = root_workspace.all_dependencies();
     println!("Libraries:\n{:#?}", libraries);
+
+    let all_workspaces = std::iter::once(&root_workspace).chain(libraries.iter());
+    let source_file_to_workspaces = map_source_files_to_workspaces(all_workspaces);
+
+    for (file_name, workspaces) in &source_file_to_workspaces {
+        println!("'{}':", file_name.to_string_lossy());
+        for workspace in workspaces {
+            println!(
+                "  {}",
+                workspace.sws_path.file_name().unwrap().to_string_lossy()
+            );
+        }
+    }
 
     Ok(())
 }

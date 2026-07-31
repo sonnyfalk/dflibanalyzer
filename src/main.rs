@@ -20,6 +20,18 @@ struct Workspace {
     dependencies: Vec<PathBuf>,
 }
 
+#[derive(Debug)]
+struct SourceFile {
+    path: PathBuf,
+    dependencies: Vec<String>,
+}
+
+#[derive(Debug)]
+struct WorkspaceContent<'a> {
+    workspace: &'a Workspace,
+    source_files: Vec<SourceFile>,
+}
+
 impl Workspace {
     fn new(sws_file: PathBuf) -> Result<Workspace, String> {
         let sws_content = read_to_string(&sws_file).map_err(|e| {
@@ -172,6 +184,19 @@ impl Workspace {
         workspaces
     }
 
+    fn workspace_source_files(&self) -> Vec<SourceFile> {
+        self.all_source_files()
+            .into_iter()
+            .filter_map(|path| match source_file_dependencies(&path) {
+                Ok(dependencies) => Some(SourceFile { path, dependencies }),
+                Err(e) => {
+                    eprintln!("{e}");
+                    None
+                }
+            })
+            .collect()
+    }
+
     fn all_source_files(&self) -> Vec<PathBuf> {
         let mut result = Vec::new();
         for dir in self.appsrc_path.iter().chain(self.ddsrc_path.iter()) {
@@ -204,20 +229,33 @@ fn collect_source_files(dir: &Path, result: &mut Vec<PathBuf>) {
     }
 }
 
-fn map_source_files_to_workspaces<'a>(
-    workspaces: impl IntoIterator<Item = &'a Workspace>,
-) -> HashMap<OsString, Vec<&'a Workspace>> {
-    let mut map: HashMap<OsString, Vec<&'a Workspace>> = HashMap::new();
-    for workspace in workspaces {
-        for source_file in workspace.all_source_files() {
-            if let Some(file_name) = source_file.file_name() {
-                map.entry(file_name.to_os_string())
-                    .or_default()
-                    .push(workspace);
+fn source_file_dependencies(path: &Path) -> Result<Vec<String>, String> {
+    let bytes = read(path).map_err(|e| {
+        format!(
+            "Couldn't read source file, skipping '{}'",
+            path.to_string_lossy()
+        )
+    })?;
+
+    let os_content = unsafe { OsString::from_encoded_bytes_unchecked(bytes) };
+    let content = os_content.to_string_lossy();
+
+    Ok(content
+        .lines()
+        .map(str::trim)
+        .filter_map(|line| {
+            let mut words = line.split_whitespace();
+            if words
+                .next()
+                .is_some_and(|word| word.eq_ignore_ascii_case("Use"))
+                && let Some(file_name) = words.next()
+            {
+                Some(String::from(file_name))
+            } else {
+                None
             }
-        }
-    }
-    map
+        })
+        .collect())
 }
 
 fn main() -> Result<(), String> {
@@ -228,16 +266,29 @@ fn main() -> Result<(), String> {
     let libraries = root_workspace.all_dependencies();
     println!("Libraries:\n{:#?}", libraries);
 
-    let all_workspaces = std::iter::once(&root_workspace).chain(libraries.iter());
-    let source_file_to_workspaces = map_source_files_to_workspaces(all_workspaces);
+    let workspace_contents: Vec<WorkspaceContent> = std::iter::once(&root_workspace)
+        .chain(libraries.iter())
+        .map(|workspace| WorkspaceContent {
+            workspace,
+            source_files: workspace.workspace_source_files(),
+        })
+        .collect();
 
-    for (file_name, workspaces) in &source_file_to_workspaces {
-        println!("'{}':", file_name.to_string_lossy());
-        for workspace in workspaces {
-            println!(
-                "  {}",
-                workspace.sws_path.file_name().unwrap().to_string_lossy()
-            );
+    for content in &workspace_contents {
+        println!(
+            "Workspace '{}':",
+            content
+                .workspace
+                .sws_path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+        );
+        for source_file in &content.source_files {
+            println!("  {}:", source_file.path.to_string_lossy());
+            for dep in &source_file.dependencies {
+                println!("    Use {dep}");
+            }
         }
     }
 

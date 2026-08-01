@@ -5,4 +5,5 @@ edition = "2024"
 
 [dependencies]
 clap = { version = "4.6.4", features = ["derive"] }
+colored = "3.1.1"
 rust-ini = "0.21.3"

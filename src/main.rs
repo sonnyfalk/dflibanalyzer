@@ -2,6 +2,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 
 use clap::Parser;
+use colored::Colorize;
 
 mod workspace;
 mod workspace_tree;
@@ -23,7 +24,7 @@ fn print_workspace_dependency_tree(tree: &WorkspaceDependencyTree) {
     };
 
     println!();
-    println!("{}", root_workspace.name());
+    println!("{}", root_workspace.name().underline());
     print_workspace_dependencies(tree, root_workspace, 0, &mut HashSet::new());
     println!();
 }
@@ -38,6 +39,7 @@ fn print_workspace_dependencies(
     let connector_str = "├──";
     let last_connector_str = "└──";
 
+    let specified_dependencies = &workspace.dependencies;
     let dependencies = tree.workspace_dependencies(workspace);
     let last_index = dependencies.len().saturating_sub(1);
     for (index, workspace) in dependencies.into_iter().enumerate() {
@@ -46,11 +48,17 @@ fn print_workspace_dependencies(
         } else {
             last_connector_str
         };
+        let is_specified = specified_dependencies.contains(&workspace.sws_path);
+        let color = if is_specified {
+            colored::Color::Green
+        } else {
+            colored::Color::Red
+        };
         println!(
             "{}{} {}",
             level_str.repeat(level),
             connector,
-            workspace.name()
+            workspace.name().color(color)
         );
         if visited.insert(workspace.sws_path.clone()) {
             print_workspace_dependencies(tree, workspace, level + 1, visited);

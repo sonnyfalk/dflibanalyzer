@@ -17,23 +17,35 @@ struct Options {
     verbose: bool,
 }
 
-fn print_workspace_dependency_tree(tree: &WorkspaceDependencyTree) {
-    let Some(root_workspace) = tree.root_workspace() else {
-        println!("No workspaces");
-        return;
-    };
-
-    println!();
-    println!("{}", root_workspace.name().underline());
-    print_workspace_dependencies(tree, root_workspace, 0, &mut HashSet::new());
-    println!();
+struct MissingDependency<'a> {
+    workspace: &'a Workspace,
+    dependency: &'a Workspace,
 }
 
-fn print_workspace_dependencies(
-    tree: &WorkspaceDependencyTree,
-    workspace: &Workspace,
-    level: usize,
+fn print_workspace_dependency_tree(tree: &WorkspaceDependencyTree) -> Vec<MissingDependency<'_>> {
+    let root_workspace = tree.root_workspace();
+
+    println!();
+    println!("{}", root_workspace.name().bold());
+
+    let mut missing_dependencies = Vec::new();
+    print_workspace_dependencies(
+        tree,
+        root_workspace,
+        "",
+        &mut HashSet::new(),
+        &mut missing_dependencies,
+    );
+
+    missing_dependencies
+}
+
+fn print_workspace_dependencies<'a>(
+    tree: &'a WorkspaceDependencyTree,
+    workspace: &'a Workspace,
+    prefix: &str,
     visited: &mut HashSet<PathBuf>,
+    missing_dependencies: &mut Vec<MissingDependency<'a>>,
 ) {
     let level_str = "│   ";
     let connector_str = "├──";
@@ -42,33 +54,40 @@ fn print_workspace_dependencies(
     let specified_dependencies = &workspace.dependencies;
     let dependencies = tree.workspace_dependencies(workspace);
     let last_index = dependencies.len().saturating_sub(1);
-    for (index, workspace) in dependencies.into_iter().enumerate() {
+    for (index, dependency) in dependencies.into_iter().enumerate() {
         let connector = if index < last_index {
             connector_str
         } else {
             last_connector_str
         };
-        let is_specified = specified_dependencies.contains(&workspace.sws_path);
+        let is_specified = specified_dependencies.contains(&dependency.sws_path);
+        if !is_specified {
+            missing_dependencies.push(MissingDependency {
+                workspace,
+                dependency,
+            });
+        }
         let color = if is_specified {
             colored::Color::Green
         } else {
             colored::Color::Red
         };
-        println!(
-            "{}{} {}",
-            level_str.repeat(level),
-            connector,
-            workspace.name().color(color)
-        );
-        if visited.insert(workspace.sws_path.clone()) {
-            print_workspace_dependencies(tree, workspace, level + 1, visited);
-        } else {
-            println!(
-                "{}{}{}",
-                level_str.repeat(level + 1),
-                last_connector_str,
-                "(*)"
+        println!("{}{} {}", prefix, connector, dependency.name().color(color));
+        if visited.insert(dependency.sws_path.clone()) {
+            let new_prefix = if index < last_index {
+                format!("{prefix}{level_str}")
+            } else {
+                format!("{prefix}    ")
+            };
+            print_workspace_dependencies(
+                tree,
+                dependency,
+                &new_prefix,
+                visited,
+                missing_dependencies,
             );
+        } else {
+            println!("{}{}{}", prefix, last_connector_str, "(*)");
             break;
         }
     }
@@ -88,7 +107,65 @@ fn main() -> Result<(), String> {
         println!();
     }
     let tree = WorkspaceDependencyTree::new(root_workspace);
-    print_workspace_dependency_tree(&tree);
-
+    let missing_dependencies = print_workspace_dependency_tree(&tree);
+    if !missing_dependencies.is_empty() {
+        println!();
+        println!("{}", "Potential missing dependencies:".red().bold());
+        for missing_dependency in missing_dependencies {
+            println!("{}", missing_dependency.workspace.name());
+            println!("{} {}", "└──", missing_dependency.dependency.name().red());
+            println!();
+            print!(
+                "Consider adding {} as library dependency to {}.",
+                missing_dependency.dependency.name().bold(),
+                missing_dependency.workspace.name().bold()
+            );
+            if let Some(source_dependencies) = tree.analyze_source_dependency(
+                missing_dependency.workspace,
+                missing_dependency.dependency,
+            ) {
+                print!("The following source file dependencies were detected: ");
+                if let Some(source_file) = source_dependencies.first() {
+                    print!(
+                        "{} references {}",
+                        FileName::from(source_file.path.file_name().unwrap()),
+                        source_file
+                            .dependencies
+                            .iter()
+                            .take(3)
+                            .map(|f| f.to_string())
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    );
+                    if source_file.dependencies.len() > 3 {
+                        print!("...")
+                    } else {
+                        print!(".");
+                    }
+                }
+                if source_dependencies.len() > 1 {
+                    print!(
+                        " And more from {}",
+                        source_dependencies
+                            .iter()
+                            .skip(1)
+                            .take(3)
+                            .map(|source_file| {
+                                FileName::from(source_file.path.file_name().unwrap()).to_string()
+                            })
+                            .collect::<Vec<_>>()
+                            .join(","),
+                    );
+                    if source_dependencies.len() > 4 {
+                        println!("...")
+                    } else {
+                        println!(".")
+                    }
+                }
+            }
+        }
+        println!()
+    }
+    println!();
     Ok(())
 }

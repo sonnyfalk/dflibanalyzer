@@ -20,7 +20,7 @@ pub struct SourceFile {
     pub dependencies: Vec<FileName>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct FileName(String);
 
 impl Workspace {
@@ -279,5 +279,11 @@ impl Eq for FileName {}
 impl std::hash::Hash for FileName {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
         self.0.to_ascii_lowercase().hash(state);
+    }
+}
+
+impl std::fmt::Display for FileName {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
     }
 }

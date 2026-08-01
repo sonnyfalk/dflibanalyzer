@@ -45,10 +45,11 @@ impl WorkspaceDependencyTree {
         }
     }
 
-    pub fn root_workspace(&self) -> Option<&Workspace> {
+    pub fn root_workspace(&self) -> &Workspace {
         self.workspaces
             .get(&self.root_workspace_path)
             .map(|w| &w.workspace)
+            .expect("Internal error: Must have a root workspace")
     }
 
     pub fn workspace_dependencies(&self, workspace: &Workspace) -> Vec<&Workspace> {
@@ -56,6 +57,40 @@ impl WorkspaceDependencyTree {
             .get(&workspace.sws_path)
             .map(|w| self.calculated_workspace_dependencies(w))
             .unwrap_or_default()
+    }
+
+    pub fn analyze_source_dependency(
+        &self,
+        workspace: &Workspace,
+        dependency: &Workspace,
+    ) -> Option<Vec<SourceFile>> {
+        let content = self.workspaces.get(&workspace.sws_path)?;
+        let files: Vec<SourceFile> = content
+            .source_files
+            .iter()
+            .filter_map(|source_file| {
+                let deps: Vec<FileName> = source_file
+                    .dependencies
+                    .iter()
+                    .filter(|dep| {
+                        self.source_file_to_workspace_map
+                            .get(dep)
+                            .is_some_and(|workspaces| workspaces.contains(&dependency.sws_path))
+                    })
+                    .cloned()
+                    .collect();
+                if !deps.is_empty() {
+                    Some(SourceFile {
+                        path: source_file.path.clone(),
+                        dependencies: deps,
+                    })
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if !files.is_empty() { Some(files) } else { None }
     }
 
     fn calculated_workspace_dependencies(

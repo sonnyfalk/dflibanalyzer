@@ -19,7 +19,7 @@ struct Options {
 
 struct MissingDependency<'a> {
     workspace: &'a Workspace,
-    dependency: &'a Workspace,
+    dependency: WorkspaceDependency<'a>,
 }
 
 fn print_workspace_dependency_tree(tree: &WorkspaceDependencyTree) -> Vec<MissingDependency<'_>> {
@@ -29,6 +29,11 @@ fn print_workspace_dependency_tree(tree: &WorkspaceDependencyTree) -> Vec<Missin
     println!("{}", root_workspace.name().bold());
 
     let mut missing_dependencies = Vec::new();
+    if root_workspace.dependencies.is_empty() {
+        println!("└── {}", "(No dependencies)".green());
+        return vec![];
+    }
+
     print_workspace_dependencies(
         tree,
         root_workspace,
@@ -60,37 +65,120 @@ fn print_workspace_dependencies<'a>(
         } else {
             last_connector_str
         };
-        let is_specified = specified_dependencies.contains(&dependency.sws_path);
+        let is_specified = dependency
+            .only_one()
+            .map(|w| specified_dependencies.contains(&w.sws_path))
+            .unwrap_or_default();
+        let color = if is_specified {
+            colored::Color::Green
+        } else {
+            colored::Color::Red
+        };
+        println!(
+            "{}{} {}",
+            prefix,
+            connector,
+            dependency.to_string().color(color)
+        );
+
+        let new_prefix = if index < last_index {
+            format!("{prefix}{level_str}")
+        } else {
+            format!("{prefix}    ")
+        };
+        let dependency_workspaces = dependency.all();
+        for dependency in dependency_workspaces {
+            if visited.insert(dependency.sws_path.clone()) {
+                print_workspace_dependencies(
+                    tree,
+                    dependency,
+                    &new_prefix,
+                    visited,
+                    missing_dependencies,
+                );
+            }
+        }
         if !is_specified {
             missing_dependencies.push(MissingDependency {
                 workspace,
                 dependency,
             });
         }
-        let color = if is_specified {
-            colored::Color::Green
-        } else {
-            colored::Color::Red
-        };
-        println!("{}{} {}", prefix, connector, dependency.name().color(color));
-        if visited.insert(dependency.sws_path.clone()) {
-            let new_prefix = if index < last_index {
-                format!("{prefix}{level_str}")
-            } else {
-                format!("{prefix}    ")
-            };
-            print_workspace_dependencies(
-                tree,
-                dependency,
-                &new_prefix,
-                visited,
-                missing_dependencies,
+    }
+}
+
+fn print_missing_dependency(
+    missing_dependency: &MissingDependency,
+    tree: &WorkspaceDependencyTree,
+) {
+    println!();
+    println!("{}", missing_dependency.workspace.name());
+    println!(
+        "{} {}",
+        "└──",
+        missing_dependency.dependency.to_string().red()
+    );
+    println!();
+    if let Some(dep) = missing_dependency.dependency.only_one() {
+        print!(
+            "Missing library dependency. Consider adding {} as a library dependency to {}.",
+            dep.name().bold(),
+            missing_dependency.workspace.name().bold()
+        );
+    } else {
+        print!(
+            "Ambiguous library dependency with source file dependencies found in multiple libraries: {}.",
+            missing_dependency.dependency.to_string().bold()
+        );
+        print!(
+            " Check library dependencies of {}. Consider specifying unique direct library dependencies to match expected overriding behavior. Dependencies on all or none of {} makes it ambiguous.",
+            missing_dependency.workspace.name().bold(),
+            missing_dependency.dependency.to_string().bold()
+        );
+    }
+    if let Some(source_dependencies) =
+        tree.analyze_source_dependency(missing_dependency.workspace, &missing_dependency.dependency)
+    {
+        print!(" Analysis detected the following ambiguous source file dependencies: ");
+        if let Some(source_file) = source_dependencies.first() {
+            print!(
+                "{} references {}",
+                FileName::from(source_file.path.file_name().unwrap()),
+                source_file
+                    .dependencies
+                    .iter()
+                    .take(3)
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>()
+                    .join(", ")
             );
-        } else {
-            println!("{}{}{}", prefix, last_connector_str, "(*)");
-            break;
+            if source_file.dependencies.len() > 3 {
+                print!("...")
+            } else {
+                print!(".");
+            }
+        }
+        if source_dependencies.len() > 1 {
+            print!(
+                " And more from {}",
+                source_dependencies
+                    .iter()
+                    .skip(1)
+                    .take(3)
+                    .map(|source_file| {
+                        FileName::from(source_file.path.file_name().unwrap()).to_string()
+                    })
+                    .collect::<Vec<_>>()
+                    .join(","),
+            );
+            if source_dependencies.len() > 4 {
+                println!("...")
+            } else {
+                println!(".")
+            }
         }
     }
+    println!();
 }
 
 fn main() -> Result<(), String> {
@@ -104,67 +192,39 @@ fn main() -> Result<(), String> {
         println!();
         println!("Library workspaces config:");
         println!("{:#?}", libraries);
-        println!();
     }
+    println!();
+
+    println!(
+        "Analyzing workspace dependencies for {}",
+        root_workspace.name().bold()
+    );
     let tree = WorkspaceDependencyTree::new(root_workspace);
     let missing_dependencies = print_workspace_dependency_tree(&tree);
     if !missing_dependencies.is_empty() {
         println!();
-        println!("{}", "Potential missing dependencies:".red().bold());
+        println!(
+            "{}: {}",
+            "Dependency Error".red(),
+            "Analysis found potential missing/ambiguous dependencies".bold()
+        );
         for missing_dependency in missing_dependencies {
-            println!("{}", missing_dependency.workspace.name());
-            println!("{} {}", "└──", missing_dependency.dependency.name().red());
-            println!();
-            print!(
-                "Consider adding {} as library dependency to {}.",
-                missing_dependency.dependency.name().bold(),
-                missing_dependency.workspace.name().bold()
-            );
-            if let Some(source_dependencies) = tree.analyze_source_dependency(
-                missing_dependency.workspace,
-                missing_dependency.dependency,
-            ) {
-                print!("The following source file dependencies were detected: ");
-                if let Some(source_file) = source_dependencies.first() {
-                    print!(
-                        "{} references {}",
-                        FileName::from(source_file.path.file_name().unwrap()),
-                        source_file
-                            .dependencies
-                            .iter()
-                            .take(3)
-                            .map(|f| f.to_string())
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    );
-                    if source_file.dependencies.len() > 3 {
-                        print!("...")
-                    } else {
-                        print!(".");
-                    }
-                }
-                if source_dependencies.len() > 1 {
-                    print!(
-                        " And more from {}",
-                        source_dependencies
-                            .iter()
-                            .skip(1)
-                            .take(3)
-                            .map(|source_file| {
-                                FileName::from(source_file.path.file_name().unwrap()).to_string()
-                            })
-                            .collect::<Vec<_>>()
-                            .join(","),
-                    );
-                    if source_dependencies.len() > 4 {
-                        println!("...")
-                    } else {
-                        println!(".")
-                    }
-                }
-            }
+            print_missing_dependency(&missing_dependency, &tree);
         }
         println!()
+    } else if tree.root_workspace().dependencies.is_empty() {
+        println!();
+        println!(
+            "The workspace {} has no libraries",
+            tree.root_workspace().name().bold()
+        );
+    } else {
+        println!();
+        println!(
+            "{}: {}",
+            "Success".green(),
+            "Analysis completed and all dependencies match".bold()
+        );
     }
     println!();
     Ok(())

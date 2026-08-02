@@ -11,6 +11,12 @@ pub struct WorkspaceDependencyTree {
 }
 
 #[derive(Debug)]
+pub enum WorkspaceDependency<'a> {
+    Dependency(&'a Workspace),
+    Ambiguous(Vec<&'a Workspace>),
+}
+
+#[derive(Debug)]
 struct WorkspaceContent {
     workspace: Workspace,
     source_files: Vec<SourceFile>,
@@ -37,7 +43,6 @@ impl WorkspaceDependencyTree {
                 map
             },
         );
-
         Self {
             workspaces,
             root_workspace_path,
@@ -52,7 +57,7 @@ impl WorkspaceDependencyTree {
             .expect("Internal error: Must have a root workspace")
     }
 
-    pub fn workspace_dependencies(&self, workspace: &Workspace) -> Vec<&Workspace> {
+    pub fn workspace_dependencies(&self, workspace: &Workspace) -> Vec<WorkspaceDependency<'_>> {
         self.workspaces
             .get(&workspace.sws_path)
             .map(|w| self.calculated_workspace_dependencies(w))
@@ -62,9 +67,10 @@ impl WorkspaceDependencyTree {
     pub fn analyze_source_dependency(
         &self,
         workspace: &Workspace,
-        dependency: &Workspace,
+        dependency: &WorkspaceDependency,
     ) -> Option<Vec<SourceFile>> {
         let content = self.workspaces.get(&workspace.sws_path)?;
+        let dependencies = dependency.all();
         let files: Vec<SourceFile> = content
             .source_files
             .iter()
@@ -75,7 +81,11 @@ impl WorkspaceDependencyTree {
                     .filter(|dep| {
                         self.source_file_to_workspace_map
                             .get(dep)
-                            .is_some_and(|workspaces| workspaces.contains(&dependency.sws_path))
+                            .is_some_and(|workspaces| {
+                                dependencies
+                                    .iter()
+                                    .all(|dependency| workspaces.contains(&dependency.sws_path))
+                            })
                     })
                     .cloned()
                     .collect();
@@ -93,12 +103,13 @@ impl WorkspaceDependencyTree {
         if !files.is_empty() { Some(files) } else { None }
     }
 
-    fn calculated_workspace_dependencies(
-        &self,
+    fn calculated_workspace_dependencies<'a>(
+        &'a self,
         workspace_content: &WorkspaceContent,
-    ) -> Vec<&Workspace> {
+    ) -> Vec<WorkspaceDependency<'a>> {
         let mut seen_workspaces = HashSet::new();
-        seen_workspaces.insert(&workspace_content.workspace.sws_path);
+        seen_workspaces
+            .insert(WorkspaceDependency::Dependency(&workspace_content.workspace).to_string());
 
         workspace_content
             .source_files
@@ -108,12 +119,40 @@ impl WorkspaceDependencyTree {
                 match self.source_file_to_workspace_map.get(file_dep) {
                     Some(workspaces) => {
                         if workspaces.len() > 1 {
-                            // FIXME: Ambigous workspace dependency, same file name is in multiple workspaces.
+                            // Ambiguous workspace dependency, same file name is in multiple workspaces.
+                            // Disambiguate with defined direct dependencies, which will match with makepath ordering.
+                            let matching_dependencies: Vec<_> = workspace_content
+                                .workspace
+                                .dependencies
+                                .iter()
+                                .filter(|dep| workspaces.contains(dep))
+                                .collect();
+                            if matching_dependencies.len() == 1 {
+                                matching_dependencies
+                                    .first()
+                                    .and_then(|&p| self.workspaces.get(p))
+                                    .map(|wc| WorkspaceDependency::Dependency(&wc.workspace))
+                            } else if matching_dependencies.len() > 1 {
+                                let workspace_dependencies = matching_dependencies
+                                    .iter()
+                                    .filter_map(|&p| self.workspaces.get(p))
+                                    .map(|wc| &wc.workspace)
+                                    .collect();
+                                Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
+                            } else {
+                                let workspace_dependencies = workspaces
+                                    .iter()
+                                    .filter_map(|p| self.workspaces.get(p))
+                                    .map(|wc| &wc.workspace)
+                                    .collect();
+                                Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
+                            }
+                        } else {
+                            workspaces
+                                .first()
+                                .and_then(|p| self.workspaces.get(p))
+                                .map(|wc| WorkspaceDependency::Dependency(&wc.workspace))
                         }
-                        workspaces
-                            .first()
-                            .and_then(|p| self.workspaces.get(p))
-                            .map(|wc| &wc.workspace)
                     }
                     None => {
                         //FIXME: Unresolved file dependency.
@@ -121,12 +160,45 @@ impl WorkspaceDependencyTree {
                     }
                 }
             })
-            .fold(Vec::new(), |mut result, workspace| {
-                if seen_workspaces.insert(&workspace.sws_path) {
-                    result.push(workspace);
+            .fold(Vec::new(), |mut result, workspace_dependency| {
+                if seen_workspaces.insert(workspace_dependency.to_string()) {
+                    result.push(workspace_dependency);
                 }
                 result
             })
+    }
+}
+
+impl<'a> WorkspaceDependency<'a> {
+    pub fn only_one(&self) -> Option<&Workspace> {
+        match self {
+            Self::Dependency(dependency) => Some(dependency),
+            Self::Ambiguous(_) => None,
+        }
+    }
+
+    pub fn all(&self) -> Vec<&'a Workspace> {
+        match self {
+            Self::Dependency(dependency) => vec![dependency],
+            Self::Ambiguous(dependencies) => dependencies.clone(),
+        }
+    }
+}
+
+impl<'a> std::fmt::Display for WorkspaceDependency<'a> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Dependency(dependency) => write!(f, "{}", dependency.name()),
+            Self::Ambiguous(dependencies) => write!(
+                f,
+                "{}",
+                dependencies
+                    .iter()
+                    .map(|w| w.name())
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        }
     }
 }
 

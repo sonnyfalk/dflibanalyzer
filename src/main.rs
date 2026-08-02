@@ -196,7 +196,7 @@ fn main() -> Result<(), String> {
     println!();
 
     println!(
-        "Analyzing workspace dependencies for {}",
+        "Analyzing local workspace dependencies for {}",
         root_workspace.name().bold()
     );
     let tree = WorkspaceDependencyTree::new(root_workspace);
@@ -215,7 +215,7 @@ fn main() -> Result<(), String> {
     } else if tree.root_workspace().dependencies.is_empty() {
         println!();
         println!(
-            "The workspace {} has no libraries",
+            "The workspace {} has no local library/package dependencies",
             tree.root_workspace().name().bold()
         );
     } else {
@@ -223,7 +223,7 @@ fn main() -> Result<(), String> {
         println!(
             "{}: {}",
             "Success".green(),
-            "Analysis completed and all dependencies match".bold()
+            "Analysis completed and all local library dependencies match".bold()
         );
     }
     println!();

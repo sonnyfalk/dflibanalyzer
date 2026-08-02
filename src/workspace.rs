@@ -4,6 +4,7 @@ use std::fs::*;
 use std::path::{Path, PathBuf};
 
 use ini::*;
+use serde::Deserialize;
 
 #[derive(Debug)]
 pub struct Workspace {
@@ -12,6 +13,19 @@ pub struct Workspace {
     pub appsrc_path: Vec<PathBuf>,
     pub ddsrc_path: Vec<PathBuf>,
     pub dependencies: Vec<PathBuf>,
+}
+
+#[derive(Deserialize)]
+struct JsonWorkspaceFile {
+    dependencies: Option<Vec<serde_json::Value>>,
+    paths: Option<JsonWorkspacePaths>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct JsonWorkspacePaths {
+    app_src: Option<serde_json::Value>,
+    dd_src: Option<serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -25,6 +39,109 @@ pub struct FileName(String);
 
 impl Workspace {
     pub fn new(sws_file: PathBuf) -> Result<Workspace, String> {
+        Self::try_new_from_json_file(sws_file.clone())
+            .or_else(|_| Self::try_new_from_ini_file(sws_file))
+    }
+
+    fn try_new_from_json_file(sws_file: PathBuf) -> Result<Workspace, String> {
+        let sws_content = read_to_string(&sws_file).map_err(|e| {
+            format!(
+                "Couldn't open workspace file '{}': {}",
+                sws_file.to_string_lossy(),
+                e
+            )
+        })?;
+        if let Ok(workspace_file) = serde_json::from_str::<JsonWorkspaceFile>(&sws_content) {
+            let root_folder = sws_file
+                .parent()
+                .map(|p| p.to_path_buf())
+                .expect("Internal error: must have a sws root folder");
+            let appsrc_paths: Vec<_> = workspace_file
+                .paths
+                .as_ref()
+                .and_then(|paths| paths.app_src.as_ref())
+                .map(|value| match value {
+                    serde_json::Value::String(s) => vec![PathBuf::from(s)],
+                    serde_json::Value::Array(array) => array
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(PathBuf::from)
+                        .collect(),
+                    _ => Vec::new(),
+                })
+                .into_iter()
+                .flat_map(|v| v.into_iter())
+                .filter_map(|p| {
+                    if p.is_relative() {
+                        std::path::absolute(root_folder.join(p)).ok()
+                    } else {
+                        Some(p)
+                    }
+                })
+                .collect();
+            let ddsrc_paths: Vec<_> = workspace_file
+                .paths
+                .as_ref()
+                .and_then(|paths| paths.dd_src.as_ref())
+                .map(|value| match value {
+                    serde_json::Value::String(s) => vec![PathBuf::from(s)],
+                    serde_json::Value::Array(array) => array
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(PathBuf::from)
+                        .collect(),
+                    _ => Vec::new(),
+                })
+                .into_iter()
+                .flat_map(|v| v.into_iter())
+                .filter_map(|p| {
+                    if p.is_relative() {
+                        std::path::absolute(root_folder.join(p)).ok()
+                    } else {
+                        Some(p)
+                    }
+                })
+                .collect();
+            let dependencies: Vec<_> = workspace_file
+                .dependencies
+                .iter()
+                .flat_map(|deps| deps.iter())
+                .filter_map(|value| value.as_str())
+                .filter(|s| s.starts_with("..") || s.starts_with("/"))
+                .map(PathBuf::from)
+                .filter_map(|p| {
+                    if p.is_relative() {
+                        std::path::absolute(root_folder.join(p)).ok()
+                    } else {
+                        Some(p)
+                    }
+                })
+                .collect();
+
+            Ok(Workspace {
+                sws_path: sws_file,
+                _df_version: None,
+                appsrc_path: if !appsrc_paths.is_empty() {
+                    appsrc_paths
+                } else {
+                    vec![root_folder.join("AppSrc")]
+                },
+                ddsrc_path: if !ddsrc_paths.is_empty() {
+                    ddsrc_paths
+                } else {
+                    vec![root_folder.join("DdSrc")]
+                },
+                dependencies,
+            })
+        } else {
+            Err(format!(
+                "Couldn't read workspace file '{}': Unrecognized format",
+                sws_file.to_string_lossy()
+            ))
+        }
+    }
+
+    fn try_new_from_ini_file(sws_file: PathBuf) -> Result<Workspace, String> {
         let sws_content = read_to_string(&sws_file).map_err(|e| {
             format!(
                 "Couldn't open workspace file '{}': {}",

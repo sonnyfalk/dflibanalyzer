@@ -4,6 +4,10 @@ This command line tool analyzes DataFlex source files in a workspace, and displa
 It identifies missing or ambiguous library dependencies based on the actual `Use` statements in source files,
 and suggests `.sws` file updates accordingly.
 
+## Installing
+
+You can install the latest pre-built binary release from https://github.com/sonnyfalk/dflibanalyzer/releases.
+
 ## Usage
 
 ```

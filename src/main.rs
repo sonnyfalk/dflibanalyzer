@@ -75,10 +75,17 @@ fn print_workspace_dependencies<'a>(
             colored::Color::Red
         };
         println!(
-            "{}{} {}",
+            "{}{} {}{}",
             prefix,
             connector,
-            dependency.to_string().color(color)
+            dependency.to_string().color(color),
+            match is_specified {
+                true => "",
+                false => match dependency {
+                    WorkspaceDependency::Dependency(_) => " (Missing)",
+                    WorkspaceDependency::Ambiguous(_) => " (Ambiguous)",
+                },
+            }
         );
 
         let new_prefix = if index < last_index {

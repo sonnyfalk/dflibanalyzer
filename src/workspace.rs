@@ -280,21 +280,21 @@ impl Workspace {
         self.sws_path.file_name().unwrap().to_string_lossy()
     }
 
-    pub fn recursively_specified_dependencies(&self) -> Vec<Workspace> {
+    pub fn all_defined_dependency_workspaces(&self) -> Vec<Workspace> {
         let mut workspaces = Vec::new();
         let mut dependencies = VecDeque::from_iter(self.dependencies.iter().cloned());
         let mut visited = std::collections::HashSet::new();
 
-        while let Some(library_sws) = dependencies.pop_front() {
-            if visited.insert(library_sws.clone()) {
-                match Workspace::new(library_sws) {
-                    Ok(workspace) => {
-                        dependencies.extend(workspace.dependencies.clone());
-                        workspaces.push(workspace);
-                    }
-                    Err(e) => {
-                        eprintln!("{e}");
-                    }
+        while let Some(library_sws) = dependencies.pop_front()
+            && visited.insert(library_sws.clone())
+        {
+            match Workspace::new(library_sws) {
+                Ok(workspace) => {
+                    dependencies.extend(workspace.dependencies.clone());
+                    workspaces.push(workspace);
+                }
+                Err(e) => {
+                    eprintln!("{e}");
                 }
             }
         }

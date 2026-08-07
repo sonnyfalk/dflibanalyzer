@@ -56,8 +56,8 @@ fn print_workspace_dependencies<'a>(
     let connector_str = "├──";
     let last_connector_str = "└──";
 
-    let specified_dependencies = &workspace.dependencies;
-    let dependencies = tree.workspace_dependencies(workspace);
+    let specified_dependencies = tree.defined_transitive_workspace_dependencies(workspace);
+    let dependencies = tree.calculated_workspace_dependencies(workspace);
     let last_index = dependencies.len().saturating_sub(1);
     for (index, dependency) in dependencies.into_iter().enumerate() {
         let connector = if index < last_index {
@@ -193,7 +193,7 @@ fn main() -> Result<(), String> {
 
     let root_workspace = Workspace::new(options.sws_file)?;
     if options.verbose {
-        let libraries = root_workspace.recursively_specified_dependencies();
+        let libraries = root_workspace.all_defined_dependency_workspaces();
         println!("Root workspace config:");
         println!("{:#?}", root_workspace);
         println!();

@@ -25,7 +25,7 @@ struct WorkspaceContent {
 impl WorkspaceDependencyTree {
     pub fn new(root_workspace: Workspace) -> Self {
         let root_workspace_path = root_workspace.sws_path.clone();
-        let libraries = root_workspace.recursively_specified_dependencies();
+        let libraries = root_workspace.all_defined_dependency_workspaces();
         let workspaces: HashMap<PathBuf, WorkspaceContent> = std::iter::once(root_workspace)
             .chain(libraries)
             .map(|ws| (ws.sws_path.clone(), WorkspaceContent::new(ws)))
@@ -57,11 +57,24 @@ impl WorkspaceDependencyTree {
             .expect("Internal error: Must have a root workspace")
     }
 
-    pub fn workspace_dependencies(&self, workspace: &Workspace) -> Vec<WorkspaceDependency<'_>> {
-        self.workspaces
-            .get(&workspace.sws_path)
-            .map(|w| self.calculated_workspace_dependencies(w))
-            .unwrap_or_default()
+    pub fn defined_transitive_workspace_dependencies(
+        &self,
+        workspace: &Workspace,
+    ) -> HashSet<PathBuf> {
+        let mut all_dependencies = HashSet::<PathBuf>::new();
+        let mut workspaces: Vec<&Workspace> = vec![workspace];
+        while let Some(workspace) = workspaces.pop() {
+            for dependency in workspace
+                .dependencies
+                .iter()
+                .filter(|&p| all_dependencies.insert(p.clone()))
+                .filter_map(|p| self.workspaces.get(p))
+                .map(|wc| &wc.workspace)
+            {
+                workspaces.push(dependency);
+            }
+        }
+        all_dependencies
     }
 
     pub fn analyze_source_dependency(
@@ -103,10 +116,14 @@ impl WorkspaceDependencyTree {
         if !files.is_empty() { Some(files) } else { None }
     }
 
-    fn calculated_workspace_dependencies<'a>(
-        &'a self,
-        workspace_content: &WorkspaceContent,
-    ) -> Vec<WorkspaceDependency<'a>> {
+    pub fn calculated_workspace_dependencies(
+        &self,
+        workspace: &Workspace,
+    ) -> Vec<WorkspaceDependency<'_>> {
+        let Some(workspace_content) = self.workspaces.get(&workspace.sws_path) else {
+            return Vec::new();
+        };
+
         let mut seen_workspaces = HashSet::new();
         seen_workspaces
             .insert(WorkspaceDependency::Dependency(&workspace_content.workspace).to_string());

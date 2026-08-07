@@ -137,33 +137,44 @@ impl WorkspaceDependencyTree {
                     Some(workspaces) => {
                         if workspaces.len() > 1 {
                             // Ambiguous workspace dependency, same file name is in multiple workspaces.
-                            // Disambiguate with defined direct dependencies, which will match with makepath ordering.
-                            let matching_dependencies: Vec<_> = workspace_content
-                                .workspace
-                                .dependencies
+                            // Before DataFlex 26, the makepath order was depth-first,
+                            // and after DataFlex 26, the makepath order is breadth-first.
+                            // For now, flag all as ambiguous to establish a baseline.
+                            // FIXME: This should check both before and after 26 behavior, compare the difference in results.
+                            let workspace_dependencies = workspaces
                                 .iter()
-                                .filter(|dep| workspaces.contains(dep))
+                                .filter_map(|p| self.workspaces.get(p))
+                                .map(|wc| &wc.workspace)
                                 .collect();
-                            if matching_dependencies.len() == 1 {
-                                matching_dependencies
-                                    .first()
-                                    .and_then(|&p| self.workspaces.get(p))
-                                    .map(|wc| WorkspaceDependency::Dependency(&wc.workspace))
-                            } else if matching_dependencies.len() > 1 {
-                                let workspace_dependencies = matching_dependencies
-                                    .iter()
-                                    .filter_map(|&p| self.workspaces.get(p))
-                                    .map(|wc| &wc.workspace)
-                                    .collect();
-                                Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
-                            } else {
-                                let workspace_dependencies = workspaces
-                                    .iter()
-                                    .filter_map(|p| self.workspaces.get(p))
-                                    .map(|wc| &wc.workspace)
-                                    .collect();
-                                Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
-                            }
+                            Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
+                            // // Ambiguous workspace dependency, same file name is in multiple workspaces.
+                            // // Disambiguate with defined direct dependencies, which will match with makepath ordering.
+                            // let matching_dependencies: Vec<_> = workspace_content
+                            //     .workspace
+                            //     .dependencies
+                            //     .iter()
+                            //     .filter(|dep| workspaces.contains(dep))
+                            //     .collect();
+                            // if matching_dependencies.len() == 1 {
+                            //     matching_dependencies
+                            //         .first()
+                            //         .and_then(|&p| self.workspaces.get(p))
+                            //         .map(|wc| WorkspaceDependency::Dependency(&wc.workspace))
+                            // } else if matching_dependencies.len() > 1 {
+                            //     let workspace_dependencies = matching_dependencies
+                            //         .iter()
+                            //         .filter_map(|&p| self.workspaces.get(p))
+                            //         .map(|wc| &wc.workspace)
+                            //         .collect();
+                            //     Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
+                            // } else {
+                            //     let workspace_dependencies = workspaces
+                            //         .iter()
+                            //         .filter_map(|p| self.workspaces.get(p))
+                            //         .map(|wc| &wc.workspace)
+                            //         .collect();
+                            //     Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
+                            // }
                         } else {
                             workspaces
                                 .first()

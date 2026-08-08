@@ -1,5 +1,5 @@
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::workspace::*;
 
@@ -13,6 +13,7 @@ pub struct WorkspaceDependencyTree {
 #[derive(Debug)]
 pub enum WorkspaceDependency<'a> {
     Dependency(&'a Workspace),
+    Missing(&'a Workspace),
     Ambiguous(Vec<&'a Workspace>),
 }
 
@@ -51,10 +52,12 @@ impl WorkspaceDependencyTree {
     }
 
     pub fn root_workspace(&self) -> &Workspace {
-        self.workspaces
-            .get(&self.root_workspace_path)
-            .map(|w| &w.workspace)
+        self.workspace(&self.root_workspace_path)
             .expect("Internal error: Must have a root workspace")
+    }
+
+    pub fn workspace(&self, workspace_path: &Path) -> Option<&Workspace> {
+        self.workspaces.get(workspace_path).map(|w| &w.workspace)
     }
 
     pub fn defined_transitive_workspace_dependencies(
@@ -201,6 +204,7 @@ impl<'a> WorkspaceDependency<'a> {
     pub fn only_one(&self) -> Option<&Workspace> {
         match self {
             Self::Dependency(dependency) => Some(dependency),
+            Self::Missing(dependency) => Some(dependency),
             Self::Ambiguous(_) => None,
         }
     }
@@ -208,6 +212,7 @@ impl<'a> WorkspaceDependency<'a> {
     pub fn all(&self) -> Vec<&'a Workspace> {
         match self {
             Self::Dependency(dependency) => vec![dependency],
+            Self::Missing(dependency) => vec![dependency],
             Self::Ambiguous(dependencies) => dependencies.clone(),
         }
     }
@@ -217,6 +222,7 @@ impl<'a> std::fmt::Display for WorkspaceDependency<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Dependency(dependency) => write!(f, "{}", dependency.name()),
+            Self::Missing(dependency) => write!(f, "{}", dependency.name()),
             Self::Ambiguous(dependencies) => write!(
                 f,
                 "{}",

@@ -56,8 +56,30 @@ fn print_workspace_dependencies<'a>(
     let connector_str = "├──";
     let last_connector_str = "└──";
 
-    let specified_dependencies = tree.defined_transitive_workspace_dependencies(workspace);
-    let dependencies = tree.calculated_workspace_dependencies(workspace);
+    let defined_dependencies = tree.defined_transitive_workspace_dependencies(workspace);
+    let calculated_dependencies = tree.calculated_workspace_dependencies(workspace);
+    let dependencies: Vec<WorkspaceDependency> = workspace
+        .dependencies
+        .iter()
+        .filter_map(|p| tree.workspace(p))
+        .map(|w| WorkspaceDependency::Dependency(w))
+        .chain(
+            calculated_dependencies
+                .into_iter()
+                .filter_map(|dep| match dep {
+                    WorkspaceDependency::Dependency(workspace) => {
+                        if !defined_dependencies.contains(&workspace.sws_path) {
+                            Some(WorkspaceDependency::Missing(workspace))
+                        } else {
+                            None
+                        }
+                    }
+                    WorkspaceDependency::Ambiguous(_) => Some(dep),
+                    WorkspaceDependency::Missing(_) => Some(dep),
+                }),
+        )
+        .collect();
+
     let last_index = dependencies.len().saturating_sub(1);
     for (index, dependency) in dependencies.into_iter().enumerate() {
         let connector = if index < last_index {
@@ -65,10 +87,7 @@ fn print_workspace_dependencies<'a>(
         } else {
             last_connector_str
         };
-        let is_specified = dependency
-            .only_one()
-            .map(|w| specified_dependencies.contains(&w.sws_path))
-            .unwrap_or_default();
+        let is_specified = matches!(dependency, WorkspaceDependency::Dependency(_));
         let color = if is_specified {
             colored::Color::Green
         } else {
@@ -82,28 +101,28 @@ fn print_workspace_dependencies<'a>(
             match is_specified {
                 true => "",
                 false => match dependency {
-                    WorkspaceDependency::Dependency(_) => " (Missing)",
+                    WorkspaceDependency::Dependency(_) => "",
+                    WorkspaceDependency::Missing(_) => " (Missing)",
                     WorkspaceDependency::Ambiguous(_) => " (Ambiguous)",
                 },
             }
         );
 
-        let new_prefix = if index < last_index {
-            format!("{prefix}{level_str}")
-        } else {
-            format!("{prefix}    ")
-        };
-        let dependency_workspaces = dependency.all();
-        for dependency in dependency_workspaces {
-            if visited.insert(dependency.sws_path.clone()) {
-                print_workspace_dependencies(
-                    tree,
-                    dependency,
-                    &new_prefix,
-                    visited,
-                    missing_dependencies,
-                );
-            }
+        if let WorkspaceDependency::Dependency(dependency) = dependency
+            && visited.insert(dependency.sws_path.clone())
+        {
+            let new_prefix = if index < last_index {
+                format!("{prefix}{level_str}")
+            } else {
+                format!("{prefix}    ")
+            };
+            print_workspace_dependencies(
+                tree,
+                dependency,
+                &new_prefix,
+                visited,
+                missing_dependencies,
+            );
         }
         if !is_specified {
             missing_dependencies.push(MissingDependency {

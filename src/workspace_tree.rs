@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::path::{Path, PathBuf};
 
 use crate::workspace::*;
@@ -21,6 +21,12 @@ pub enum WorkspaceDependency<'a> {
 struct WorkspaceContent {
     workspace: Workspace,
     source_files: Vec<SourceFile>,
+}
+
+struct BreadthFirstIterator<'a> {
+    tree: &'a WorkspaceDependencyTree,
+    workspaces: VecDeque<&'a Workspace>,
+    visited: HashSet<&'a Path>,
 }
 
 impl WorkspaceDependencyTree {
@@ -64,20 +70,40 @@ impl WorkspaceDependencyTree {
         &self,
         workspace: &Workspace,
     ) -> HashSet<PathBuf> {
-        let mut all_dependencies = HashSet::<PathBuf>::new();
-        let mut workspaces: Vec<&Workspace> = vec![workspace];
-        while let Some(workspace) = workspaces.pop() {
-            for dependency in workspace
-                .dependencies
-                .iter()
-                .filter(|&p| all_dependencies.insert(p.clone()))
-                .filter_map(|p| self.workspaces.get(p))
-                .map(|wc| &wc.workspace)
-            {
-                workspaces.push(dependency);
+        self.bfs_iter(workspace)
+            .map(|w| w.sws_path.clone())
+            .collect()
+    }
+
+    pub fn bfs_iter<'a>(&'a self, workspace: &'a Workspace) -> impl Iterator<Item = &'a Workspace> {
+        BreadthFirstIterator::new(self, workspace)
+    }
+
+    pub fn resolve_workspace_dependency_bfs<'a>(
+        &self,
+        dependency: WorkspaceDependency<'a>,
+    ) -> WorkspaceDependency<'a> {
+        let WorkspaceDependency::Ambiguous(dependencies) = dependency else {
+            return dependency;
+        };
+        let sws_dependencies: HashSet<_> = dependencies.iter().map(|w| &w.sws_path).collect();
+        if let Some(sibling_dependencies) = self
+            .bfs_iter(self.root_workspace())
+            .map(|w| &w.dependencies)
+            .find(|dependencies| dependencies.iter().any(|p| sws_dependencies.contains(p)))
+        {
+            let dependencies: Vec<_> = dependencies
+                .into_iter()
+                .filter(|workspace| sibling_dependencies.contains(&workspace.sws_path))
+                .collect();
+            if dependencies.len() == 1 {
+                WorkspaceDependency::Dependency(dependencies.first().unwrap())
+            } else {
+                WorkspaceDependency::Ambiguous(dependencies)
             }
+        } else {
+            WorkspaceDependency::Ambiguous(dependencies)
         }
-        all_dependencies
     }
 
     pub fn analyze_source_dependency(
@@ -142,42 +168,20 @@ impl WorkspaceDependencyTree {
                             // Ambiguous workspace dependency, same file name is in multiple workspaces.
                             // Before DataFlex 26, the makepath order was depth-first,
                             // and after DataFlex 26, the makepath order is breadth-first.
-                            // For now, flag all as ambiguous to establish a baseline.
+                            // For now, try to resolve the ambiguity with BFS search.
                             // FIXME: This should check both before and after 26 behavior, compare the difference in results.
                             let workspace_dependencies = workspaces
                                 .iter()
                                 .filter_map(|p| self.workspaces.get(p))
                                 .map(|wc| &wc.workspace)
                                 .collect();
-                            Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
-                            // // Ambiguous workspace dependency, same file name is in multiple workspaces.
-                            // // Disambiguate with defined direct dependencies, which will match with makepath ordering.
-                            // let matching_dependencies: Vec<_> = workspace_content
-                            //     .workspace
-                            //     .dependencies
-                            //     .iter()
-                            //     .filter(|dep| workspaces.contains(dep))
-                            //     .collect();
-                            // if matching_dependencies.len() == 1 {
-                            //     matching_dependencies
-                            //         .first()
-                            //         .and_then(|&p| self.workspaces.get(p))
-                            //         .map(|wc| WorkspaceDependency::Dependency(&wc.workspace))
-                            // } else if matching_dependencies.len() > 1 {
-                            //     let workspace_dependencies = matching_dependencies
-                            //         .iter()
-                            //         .filter_map(|&p| self.workspaces.get(p))
-                            //         .map(|wc| &wc.workspace)
-                            //         .collect();
-                            //     Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
-                            // } else {
-                            //     let workspace_dependencies = workspaces
-                            //         .iter()
-                            //         .filter_map(|p| self.workspaces.get(p))
-                            //         .map(|wc| &wc.workspace)
-                            //         .collect();
-                            //     Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
-                            // }
+                            match self.resolve_workspace_dependency_bfs(
+                                WorkspaceDependency::Ambiguous(workspace_dependencies),
+                            ) {
+                                // FIXME: Consider indicating reverse dependencies, and/or shadowed references
+                                WorkspaceDependency::Dependency(_) => None,
+                                dep => Some(dep),
+                            }
                         } else {
                             workspaces
                                 .first()
@@ -243,5 +247,33 @@ impl WorkspaceContent {
             workspace,
             source_files,
         }
+    }
+}
+
+impl<'a> BreadthFirstIterator<'a> {
+    fn new(tree: &'a WorkspaceDependencyTree, workspace: &'a Workspace) -> Self {
+        Self {
+            tree,
+            workspaces: VecDeque::from_iter(std::iter::once(workspace)),
+            visited: HashSet::from_iter(std::iter::once(workspace.sws_path.as_path())),
+        }
+    }
+}
+
+impl<'a> Iterator for BreadthFirstIterator<'a> {
+    type Item = &'a Workspace;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let workspace = self.workspaces.pop_front()?;
+        for dependency in workspace
+            .dependencies
+            .iter()
+            .filter(|p| self.visited.insert(p))
+            .filter_map(|p| self.tree.workspace(p))
+        {
+            self.workspaces.push_back(dependency);
+        }
+
+        Some(workspace)
     }
 }

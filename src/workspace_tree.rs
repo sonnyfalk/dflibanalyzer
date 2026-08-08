@@ -106,6 +106,24 @@ impl WorkspaceDependencyTree {
         }
     }
 
+    pub fn all_duplicate_filenames(&self) -> HashMap<FileName, WorkspaceDependency<'_>> {
+        self.source_file_to_workspace_map
+            .iter()
+            .filter(|(_, workspace_paths)| workspace_paths.len() > 1)
+            .map(|(source_file, workspace_paths)| {
+                (
+                    source_file.clone(),
+                    WorkspaceDependency::Ambiguous(
+                        workspace_paths
+                            .iter()
+                            .filter_map(|p| self.workspace(p))
+                            .collect(),
+                    ),
+                )
+            })
+            .collect()
+    }
+
     pub fn analyze_source_dependency(
         &self,
         workspace: &Workspace,

@@ -133,6 +133,34 @@ fn print_workspace_dependencies<'a>(
     }
 }
 
+fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
+    print!("Files with same name in multiple libraries:",);
+    let all_duplicate_filenames = tree.all_duplicate_filenames();
+    if all_duplicate_filenames.is_empty() {
+        println!(" {}", "None".green());
+        return;
+    }
+
+    println!(" {}", all_duplicate_filenames.len());
+
+    println!("{:─<25}───{:─<20}───{:─<40}", "", "", "");
+    println!(
+        "{: <25} │ {: <20} │ {}",
+        "File", "Resolved", "All Libraries"
+    );
+    println!("{:─<25}─│─{:─<20}─│─{:─<40}", "", "", "");
+    for (file, dependency) in all_duplicate_filenames {
+        let file = file.to_string();
+        let all_libraries = dependency.to_string();
+        let resolved = match tree.resolve_workspace_dependency_bfs(dependency) {
+            WorkspaceDependency::Dependency(dep) => dep.name().to_string(),
+            _ => "(Unresolved)".to_string(),
+        };
+        println!("{: <25} │ {: <20} │ {}", file, resolved, all_libraries);
+    }
+    println!("{:─<25}───{:─<20}───{:─<40}", "", "", "");
+}
+
 fn print_missing_dependency(
     missing_dependency: &MissingDependency,
     tree: &WorkspaceDependencyTree,
@@ -227,6 +255,10 @@ fn main() -> Result<(), String> {
     );
     let tree = WorkspaceDependencyTree::new(root_workspace);
     let missing_dependencies = print_workspace_dependency_tree(&tree);
+
+    println!();
+    print_workspace_duplicate_files(&tree);
+
     if !missing_dependencies.is_empty() {
         println!();
         println!(

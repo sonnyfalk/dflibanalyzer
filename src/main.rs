@@ -145,6 +145,8 @@ fn print_workspace_dependencies<'a>(
 }
 
 fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
+    let show_all_libraries = Options::shared().verbose;
+
     print!("Files with same name in multiple libraries:",);
     let all_duplicate_filenames = tree.all_duplicate_filenames();
     if all_duplicate_filenames.is_empty() {
@@ -154,22 +156,49 @@ fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
 
     println!(" {}", all_duplicate_filenames.len());
 
-    println!("{:─<25}───{:─<20}───{:─<40}", "", "", "");
-    println!(
-        "{: <25} │ {: <20} │ {}",
-        "File", "Resolved", "All Libraries"
-    );
-    println!("{:─<25}─│─{:─<20}─│─{:─<40}", "", "", "");
+    if show_all_libraries {
+        println!("{:─<25}───{:─<40}───{:─<40}", "", "", "");
+        println!(
+            "{: <25} │ {: <40} │ {}",
+            "File", "Resolved DF26 / DF25", "Candidate Libraries"
+        );
+        println!("{:─<25}─│─{:─<40}─│─{:─<40}", "", "", "");
+    } else {
+        println!("{:─<35}───{:─<45}", "", "");
+        println!("{: <35} │ {: <45}", "File", "Resolved DF26 / DF25");
+        println!("{:─<35}─│─{:─<45}", "", "");
+    }
     for (file, dependency) in all_duplicate_filenames {
         let file = file.to_string();
-        let all_libraries = dependency.to_string();
-        let resolved = match tree.resolve_workspace_dependency_bfs(dependency) {
-            WorkspaceDependency::Dependency(dep) => dep.name().to_string(),
-            _ => "(Unresolved)".to_string(),
+        let resolved26 = match tree.resolve_workspace_dependency_df26(dependency.clone()) {
+            WorkspaceDependency::Dependency(dep) => Some(dep.name().to_string()),
+            _ => None,
         };
-        println!("{: <25} │ {: <20} │ {}", file, resolved, all_libraries);
+        let resolved25 = match tree.resolve_workspace_dependency_df25(dependency.clone()) {
+            WorkspaceDependency::Dependency(dep) => Some(dep.name().to_string()),
+            _ => None,
+        };
+        let resolved = match (resolved26, resolved25) {
+            (Some(resolved26), Some(resolved25)) if resolved26 == resolved25 => resolved26.green(),
+            (resolved26, resolved25) => format!(
+                "{} / {}",
+                resolved26.unwrap_or("(Unresolved)".into()),
+                resolved25.unwrap_or("(Unresolved)".into())
+            )
+            .red(),
+        };
+        if show_all_libraries {
+            let all_libraries = dependency.to_string();
+            println!("{: <25} │ {: <40} │ {}", file, resolved, all_libraries);
+        } else {
+            println!("{: <35} │ {: <45}", file, resolved);
+        }
     }
-    println!("{:─<25}───{:─<20}───{:─<40}", "", "", "");
+    if show_all_libraries {
+        println!("{:─<25}───{:─<40}───{:─<40}", "", "", "");
+    } else {
+        println!("{:─<35}───{:─<45}", "", "");
+    }
 }
 
 fn print_missing_dependency(

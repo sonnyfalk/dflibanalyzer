@@ -10,7 +10,7 @@ pub struct WorkspaceDependencyTree {
     source_file_to_workspace_map: HashMap<FileName, Vec<PathBuf>>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum WorkspaceDependency<'a> {
     Dependency(&'a Workspace),
     Missing(&'a Workspace),
@@ -23,10 +23,16 @@ struct WorkspaceContent {
     source_files: Vec<SourceFile>,
 }
 
-struct BreadthFirstIterator<'a> {
+struct WorkspaceTreeIterator<'a> {
     tree: &'a WorkspaceDependencyTree,
+    strategy: IteratorStrategy,
     workspaces: VecDeque<&'a Workspace>,
     visited: HashSet<&'a Path>,
+}
+
+enum IteratorStrategy {
+    BreadthFirst,
+    DepthFirst,
 }
 
 impl WorkspaceDependencyTree {
@@ -70,34 +76,54 @@ impl WorkspaceDependencyTree {
         &self,
         workspace: &Workspace,
     ) -> HashSet<PathBuf> {
-        self.bfs_iter(workspace)
+        self.iter(workspace, IteratorStrategy::BreadthFirst)
             .map(|w| w.sws_path.clone())
             .collect()
     }
 
-    pub fn bfs_iter<'a>(&'a self, workspace: &'a Workspace) -> impl Iterator<Item = &'a Workspace> {
-        BreadthFirstIterator::new(self, workspace)
-    }
-
-    pub fn resolve_workspace_dependency_bfs<'a>(
+    pub fn resolve_workspace_dependency_df26<'a>(
         &self,
         dependency: WorkspaceDependency<'a>,
+    ) -> WorkspaceDependency<'a> {
+        self.resolve_workspace_dependency(dependency, IteratorStrategy::BreadthFirst, false)
+    }
+
+    pub fn resolve_workspace_dependency_df25<'a>(
+        &self,
+        dependency: WorkspaceDependency<'a>,
+    ) -> WorkspaceDependency<'a> {
+        self.resolve_workspace_dependency(dependency, IteratorStrategy::DepthFirst, true)
+    }
+
+    fn iter<'a>(
+        &'a self,
+        workspace: &'a Workspace,
+        strategy: IteratorStrategy,
+    ) -> impl Iterator<Item = &'a Workspace> {
+        WorkspaceTreeIterator::new(self, workspace, strategy)
+    }
+
+    fn resolve_workspace_dependency<'a>(
+        &self,
+        dependency: WorkspaceDependency<'a>,
+        strategy: IteratorStrategy,
+        take_first: bool,
     ) -> WorkspaceDependency<'a> {
         let WorkspaceDependency::Ambiguous(dependencies) = dependency else {
             return dependency;
         };
         let sws_dependencies: HashSet<_> = dependencies.iter().map(|w| &w.sws_path).collect();
         if let Some(sibling_dependencies) = self
-            .bfs_iter(self.root_workspace())
+            .iter(self.root_workspace(), strategy)
             .map(|w| &w.dependencies)
             .find(|dependencies| dependencies.iter().any(|p| sws_dependencies.contains(p)))
         {
-            let dependencies: Vec<_> = dependencies
-                .into_iter()
-                .filter(|workspace| sibling_dependencies.contains(&workspace.sws_path))
+            let ordered_dependencies: Vec<_> = sibling_dependencies
+                .iter()
+                .filter_map(|p| dependencies.iter().find(|w| &w.sws_path == p))
                 .collect();
-            if dependencies.len() == 1 {
-                WorkspaceDependency::Dependency(dependencies.first().unwrap())
+            if ordered_dependencies.len() == 1 || take_first {
+                WorkspaceDependency::Dependency(ordered_dependencies.first().unwrap())
             } else {
                 WorkspaceDependency::Ambiguous(dependencies)
             }
@@ -193,7 +219,7 @@ impl WorkspaceDependencyTree {
                                 .filter_map(|p| self.workspaces.get(p))
                                 .map(|wc| &wc.workspace)
                                 .collect();
-                            match self.resolve_workspace_dependency_bfs(
+                            match self.resolve_workspace_dependency_df26(
                                 WorkspaceDependency::Ambiguous(workspace_dependencies),
                             ) {
                                 // FIXME: Consider indicating reverse dependencies, and/or shadowed references
@@ -268,17 +294,22 @@ impl WorkspaceContent {
     }
 }
 
-impl<'a> BreadthFirstIterator<'a> {
-    fn new(tree: &'a WorkspaceDependencyTree, workspace: &'a Workspace) -> Self {
+impl<'a> WorkspaceTreeIterator<'a> {
+    fn new(
+        tree: &'a WorkspaceDependencyTree,
+        workspace: &'a Workspace,
+        strategy: IteratorStrategy,
+    ) -> Self {
         Self {
             tree,
+            strategy,
             workspaces: VecDeque::from_iter(std::iter::once(workspace)),
             visited: HashSet::from_iter(std::iter::once(workspace.sws_path.as_path())),
         }
     }
 }
 
-impl<'a> Iterator for BreadthFirstIterator<'a> {
+impl<'a> Iterator for WorkspaceTreeIterator<'a> {
     type Item = &'a Workspace;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -289,7 +320,10 @@ impl<'a> Iterator for BreadthFirstIterator<'a> {
             .filter(|p| self.visited.insert(p))
             .filter_map(|p| self.tree.workspace(p))
         {
-            self.workspaces.push_back(dependency);
+            match self.strategy {
+                IteratorStrategy::BreadthFirst => self.workspaces.push_back(dependency),
+                IteratorStrategy::DepthFirst => self.workspaces.push_front(dependency),
+            }
         }
 
         Some(workspace)

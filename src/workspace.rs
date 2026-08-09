@@ -6,6 +6,8 @@ use std::path::{Path, PathBuf};
 use ini::*;
 use serde::Deserialize;
 
+use crate::Options;
+
 #[derive(Debug)]
 pub struct Workspace {
     pub sws_path: PathBuf,
@@ -326,7 +328,7 @@ fn collect_source_files(dir: &Path, result: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() {
+        if path.is_dir() && Options::shared().recursive_scan {
             collect_source_files(&path, result);
         } else if path
             .extension()

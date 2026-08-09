@@ -15,6 +15,9 @@ struct Options {
     sws_file: PathBuf,
     #[arg(short, long, action)]
     verbose: bool,
+    /// Scan source files in AppSrc/DdSrc recursively.
+    #[arg(short, long, action)]
+    recursive_scan: bool,
 }
 
 struct MissingDependency<'a> {

@@ -38,12 +38,11 @@ pub struct SourceFile {
 pub struct FileName(String);
 
 impl Workspace {
-    pub fn new(sws_file: PathBuf) -> Result<Workspace, String> {
-        Self::try_new_from_json_file(sws_file.clone())
-            .or_else(|_| Self::try_new_from_ini_file(sws_file))
+    pub fn new(sws_file: &PathBuf) -> Result<Workspace, String> {
+        Self::try_new_from_json_file(sws_file).or_else(|_| Self::try_new_from_ini_file(sws_file))
     }
 
-    fn try_new_from_json_file(sws_file: PathBuf) -> Result<Workspace, String> {
+    fn try_new_from_json_file(sws_file: &PathBuf) -> Result<Workspace, String> {
         let sws_content = read_to_string(&sws_file).map_err(|e| {
             format!(
                 "Couldn't open workspace file '{}': {}",
@@ -119,7 +118,7 @@ impl Workspace {
                 .collect();
 
             Ok(Workspace {
-                sws_path: sws_file,
+                sws_path: sws_file.clone(),
                 _df_version: None,
                 appsrc_path: if !appsrc_paths.is_empty() {
                     appsrc_paths
@@ -141,7 +140,7 @@ impl Workspace {
         }
     }
 
-    fn try_new_from_ini_file(sws_file: PathBuf) -> Result<Workspace, String> {
+    fn try_new_from_ini_file(sws_file: &PathBuf) -> Result<Workspace, String> {
         let sws_content = read_to_string(&sws_file).map_err(|e| {
             format!(
                 "Couldn't open workspace file '{}': {}",
@@ -253,7 +252,7 @@ impl Workspace {
                     })
                     .collect();
                 Ok(Workspace {
-                    sws_path: sws_file,
+                    sws_path: sws_file.clone(),
                     _df_version: df_version.map(String::from),
                     appsrc_path: appsrc_path,
                     ddsrc_path: ddsrc_path,
@@ -261,7 +260,7 @@ impl Workspace {
                 })
             } else {
                 Ok(Workspace {
-                    sws_path: sws_file,
+                    sws_path: sws_file.clone(),
                     _df_version: df_version.map(String::from),
                     appsrc_path: vec![root_folder.join("AppSrc")],
                     ddsrc_path: vec![root_folder.join("DdSrc")],
@@ -288,7 +287,7 @@ impl Workspace {
         while let Some(library_sws) = dependencies.pop_front()
             && visited.insert(library_sws.clone())
         {
-            match Workspace::new(library_sws) {
+            match Workspace::new(&library_sws) {
                 Ok(workspace) => {
                     dependencies.extend(workspace.dependencies.clone());
                     workspaces.push(workspace);

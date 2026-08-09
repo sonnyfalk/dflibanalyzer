@@ -303,6 +303,9 @@ impl Workspace {
     }
 
     pub fn workspace_source_files(&self) -> Vec<SourceFile> {
+        if Options::shared().verbose {
+            println!("Scanning source files for workspace: {}", self.name());
+        }
         self.appsrc_path
             .iter()
             .chain(self.ddsrc_path.iter())

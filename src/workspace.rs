@@ -1,4 +1,4 @@
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::ffi::{OsStr, OsString};
 use std::fs::*;
 use std::path::{Path, PathBuf};
@@ -306,9 +306,12 @@ impl Workspace {
         if Options::shared().verbose {
             println!("Scanning source files for workspace: {}", self.name());
         }
+
+        let mut visited_paths: HashSet<PathBuf> = HashSet::new();
         self.appsrc_path
             .iter()
             .chain(self.ddsrc_path.iter())
+            .filter(|&p| visited_paths.insert(p.clone()))
             .fold(Vec::new(), |mut result, dir| {
                 collect_source_files(dir, &mut result);
                 result

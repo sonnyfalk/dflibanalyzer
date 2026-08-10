@@ -329,3 +329,21 @@ impl<'a> Iterator for WorkspaceTreeIterator<'a> {
         Some(workspace)
     }
 }
+
+impl<'a> WorkspaceDependency<'a> {
+    pub fn sort_order(&self) -> usize {
+        match self {
+            WorkspaceDependency::Dependency(_) => 3,
+            WorkspaceDependency::Missing(_) => 2,
+            WorkspaceDependency::Ambiguous(_) => 1,
+        }
+    }
+
+    pub fn color(&self) -> colored::Color {
+        match self {
+            WorkspaceDependency::Dependency(_) => colored::Color::Green,
+            WorkspaceDependency::Missing(_) => colored::Color::Yellow,
+            WorkspaceDependency::Ambiguous(_) => colored::Color::Red,
+        }
+    }
+}

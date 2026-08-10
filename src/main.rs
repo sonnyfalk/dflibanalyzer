@@ -53,6 +53,7 @@ fn print_workspace_dependency_tree(tree: &WorkspaceDependencyTree) -> Vec<Missin
         &mut missing_dependencies,
     );
 
+    missing_dependencies.sort_by_key(|d| d.dependency.sort_order());
     missing_dependencies
 }
 
@@ -99,24 +100,16 @@ fn print_workspace_dependencies<'a>(
             last_connector_str
         };
         let is_specified = matches!(dependency, WorkspaceDependency::Dependency(_));
-        let color = if is_specified {
-            colored::Color::Green
-        } else {
-            colored::Color::Red
-        };
         println!(
             "{}{} {}{}",
             prefix,
             connector,
-            dependency.to_string().color(color),
-            match is_specified {
-                true => "",
-                false => match dependency {
-                    WorkspaceDependency::Dependency(_) => "",
-                    WorkspaceDependency::Missing(_) => " (Missing)",
-                    WorkspaceDependency::Ambiguous(_) => " (Ambiguous)",
-                },
-            }
+            dependency.to_string().color(dependency.color()),
+            match dependency {
+                WorkspaceDependency::Dependency(_) => "",
+                WorkspaceDependency::Missing(_) => " (Missing)",
+                WorkspaceDependency::Ambiguous(_) => " (Ambiguous)",
+            },
         );
 
         if let WorkspaceDependency::Dependency(dependency) = dependency
@@ -201,67 +194,73 @@ fn print_missing_dependency(
     println!(
         "{} {}",
         "└──",
-        missing_dependency.dependency.to_string().red()
+        missing_dependency
+            .dependency
+            .to_string()
+            .color(missing_dependency.dependency.color())
     );
     println!();
     if let Some(dep) = missing_dependency.dependency.only_one() {
-        print!(
-            "Missing library dependency. Consider adding {} as a library dependency to {}.",
+        println!("Missing library dependency.",);
+        println!(
+            "Solution: Consider adding {} as a library dependency to {}",
             dep.name().bold(),
             missing_dependency.workspace.name().bold()
-        );
+        )
     } else {
-        print!(
-            "Ambiguous library dependency with source file dependencies found in multiple libraries: {}.",
-            missing_dependency.dependency.to_string().bold()
-        );
-        print!(
-            " Check library dependencies of {}. Consider specifying unique direct library dependencies to match expected overriding behavior. Dependencies on all or none of {} makes it ambiguous.",
-            missing_dependency.workspace.name().bold(),
-            missing_dependency.dependency.to_string().bold()
-        );
+        println!("Ambiguous library dependency.");
+        if let WorkspaceDependency::Dependency(df25_resolution) =
+            tree.resolve_workspace_dependency_df25(missing_dependency.dependency.clone())
+        {
+            let other = WorkspaceDependency::Ambiguous(
+                missing_dependency
+                    .dependency
+                    .all()
+                    .into_iter()
+                    .filter(|d| d.name() != df25_resolution.name())
+                    .collect(),
+            );
+            println!("DataFlex 25: {}", df25_resolution.name());
+            println!(
+                "Solution: Consider pushing down {} in the dependency tree",
+                other.to_string().bold(),
+            );
+            if missing_dependency.workspace.sws_path != tree.root_workspace().sws_path {
+                println!(
+                    "Alternative Solution: Consider pulling up {} in the dependency tree.",
+                    df25_resolution.name().bold(),
+                );
+            }
+        }
     }
-    if let Some(source_dependencies) =
-        tree.analyze_source_dependency(missing_dependency.workspace, &missing_dependency.dependency)
+
+    if Options::shared().verbose
+        && let Some(source_dependencies) = tree
+            .analyze_source_dependency(missing_dependency.workspace, &missing_dependency.dependency)
     {
-        print!(" Analysis detected the following ambiguous source file dependencies: ");
-        if let Some(source_file) = source_dependencies.first() {
-            print!(
-                "{} references {}",
-                FileName::from(source_file.path.file_name().unwrap()),
-                source_file
-                    .dependencies
-                    .iter()
-                    .take(3)
-                    .map(|f| f.to_string())
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            );
-            if source_file.dependencies.len() > 3 {
-                print!("...")
-            } else {
-                print!(".");
-            }
-        }
-        if source_dependencies.len() > 1 {
-            print!(
-                " And more from {}",
-                source_dependencies
-                    .iter()
-                    .skip(1)
-                    .take(3)
-                    .map(|source_file| {
-                        FileName::from(source_file.path.file_name().unwrap()).to_string()
-                    })
-                    .collect::<Vec<_>>()
-                    .join(","),
-            );
-            if source_dependencies.len() > 4 {
-                println!("...")
-            } else {
-                println!(".")
-            }
-        }
+        println!(
+            "Impacted source files: {}",
+            source_dependencies
+                .iter()
+                .filter_map(|s| s
+                    .path
+                    .file_name()
+                    .and_then(|s| s.to_str())
+                    .map(|s| s.to_string()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+        println!(
+            "Referenced files: {}",
+            source_dependencies
+                .iter()
+                .flat_map(|s| s.dependencies.iter())
+                .collect::<HashSet<_>>()
+                .into_iter()
+                .map(|f| f.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
     }
     println!();
 }

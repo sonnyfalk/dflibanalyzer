@@ -338,7 +338,7 @@ fn collect_source_files(dir: &Path, result: &mut Vec<PathBuf>) {
             .and_then(|ext| ext.to_str())
             .is_some_and(|ext| {
                 matches!(
-                    ext,
+                    ext.to_ascii_lowercase().as_str(),
                     "pkg" | "vw" | "wo" | "sl" | "dd" | "src" | "dg" | "bp" | "rv" | "fd" | "inc"
                 )
             })

@@ -278,7 +278,7 @@ impl<'a> std::fmt::Display for WorkspaceDependency<'a> {
                     .iter()
                     .map(|w| w.name())
                     .collect::<Vec<_>>()
-                    .join(", ")
+                    .join(if f.alternate() { "\n" } else { ", " })
             ),
         }
     }

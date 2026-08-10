@@ -145,7 +145,7 @@ fn print_workspace_dependencies<'a>(
 }
 
 fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
-    let show_all_libraries = Options::shared().verbose;
+    use comfy_table::{Cell, Color, ContentArrangement, Table};
 
     print!("Files with same name in multiple libraries:",);
     let all_duplicate_filenames = tree.all_duplicate_filenames();
@@ -156,18 +156,12 @@ fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
 
     println!(" {}", all_duplicate_filenames.len());
 
-    if show_all_libraries {
-        println!("{:─<25}───{:─<40}───{:─<40}", "", "", "");
-        println!(
-            "{: <25} │ {: <40} │ {}",
-            "File", "Resolved DF26 / DF25", "Candidate Libraries"
-        );
-        println!("{:─<25}─│─{:─<40}─│─{:─<40}", "", "", "");
-    } else {
-        println!("{:─<35}───{:─<45}", "", "");
-        println!("{: <35} │ {: <45}", "File", "Resolved DF26 / DF25");
-        println!("{:─<35}─│─{:─<45}", "", "");
-    }
+    let mut table = Table::new();
+    table
+        .load_style(comfy_table::presets::UTF8_FULL.with_rounded_corners())
+        .set_content_arrangement(ContentArrangement::Dynamic)
+        .set_header(vec!["File", "Resolved DF26 / DF25", "Candidate Libraries"]);
+
     for (file, dependency) in all_duplicate_filenames {
         let file = file.to_string();
         let resolved26 = match tree.resolve_workspace_dependency_df26(dependency.clone()) {
@@ -179,26 +173,23 @@ fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
             _ => None,
         };
         let resolved = match (resolved26, resolved25) {
-            (Some(resolved26), Some(resolved25)) if resolved26 == resolved25 => resolved26.green(),
-            (resolved26, resolved25) => format!(
+            (Some(resolved26), Some(resolved25)) if resolved26 == resolved25 => {
+                Cell::new(resolved26).fg(Color::DarkGreen)
+            }
+            (resolved26, resolved25) => Cell::new(format!(
                 "{} / {}",
                 resolved26.unwrap_or("(Unresolved)".into()),
                 resolved25.unwrap_or("(Unresolved)".into())
-            )
-            .red(),
+            ))
+            .fg(Color::DarkRed),
         };
-        if show_all_libraries {
-            let all_libraries = dependency.to_string();
-            println!("{: <25} │ {: <40} │ {}", file, resolved, all_libraries);
-        } else {
-            println!("{: <35} │ {: <45}", file, resolved);
-        }
+        table.add_row(vec![
+            file.into(),
+            resolved,
+            format!("{:#}", dependency).into(),
+        ]);
     }
-    if show_all_libraries {
-        println!("{:─<25}───{:─<40}───{:─<40}", "", "", "");
-    } else {
-        println!("{:─<35}───{:─<45}", "", "");
-    }
+    println!("{table}");
 }
 
 fn print_missing_dependency(

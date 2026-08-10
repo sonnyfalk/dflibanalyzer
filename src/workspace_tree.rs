@@ -81,6 +81,17 @@ impl WorkspaceDependencyTree {
             .collect()
     }
 
+    pub fn defined_indirect_workspace_dependencies(
+        &self,
+        workspace: &Workspace,
+    ) -> HashSet<PathBuf> {
+        self.iter(workspace, IteratorStrategy::BreadthFirst)
+            .skip(1)
+            .flat_map(|w| w.dependencies.iter())
+            .cloned()
+            .collect()
+    }
+
     pub fn resolve_workspace_dependency_df26<'a>(
         &self,
         dependency: WorkspaceDependency<'a>,

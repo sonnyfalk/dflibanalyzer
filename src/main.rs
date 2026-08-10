@@ -221,15 +221,39 @@ fn print_missing_dependency(
                     .collect(),
             );
             println!("DataFlex 25: {}", df25_resolution.name());
-            println!(
-                "Solution: Consider pushing down {} in the dependency tree",
-                other.to_string().bold(),
-            );
-            if missing_dependency.workspace.sws_path != tree.root_workspace().sws_path {
+            let indirect_dependencies =
+                tree.defined_indirect_workspace_dependencies(missing_dependency.workspace);
+
+            if other
+                .all()
+                .iter()
+                .all(|w| indirect_dependencies.contains(&w.sws_path))
+            {
+                let is_multiple = other.all().len() > 1;
+                if is_multiple {
+                    println!(
+                        "Solution: Consider removing {} as library dependencies to {}. They're already included via indirect dependencies.",
+                        other.to_string().bold(),
+                        missing_dependency.workspace.name().bold()
+                    );
+                } else {
+                    println!(
+                        "Solution: Consider removing {} as a library dependency to {}. It's already included via indirect dependencies.",
+                        other.to_string().bold(),
+                        missing_dependency.workspace.name().bold()
+                    );
+                }
+            } else {
                 println!(
-                    "Alternative Solution: Consider pulling up {} in the dependency tree.",
-                    df25_resolution.name().bold(),
+                    "Solution: Consider pushing down {} in the dependency tree",
+                    other.to_string().bold(),
                 );
+                if missing_dependency.workspace.sws_path != tree.root_workspace().sws_path {
+                    println!(
+                        "Alternative Solution: Consider pulling up {} in the dependency tree.",
+                        df25_resolution.name().bold(),
+                    );
+                }
             }
         }
     }

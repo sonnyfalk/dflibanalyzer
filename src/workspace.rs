@@ -406,6 +406,20 @@ impl std::hash::Hash for FileName {
     }
 }
 
+impl PartialOrd for FileName {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Ord for FileName {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        self.0
+            .to_ascii_lowercase()
+            .cmp(&other.0.to_ascii_lowercase())
+    }
+}
+
 impl std::fmt::Display for FileName {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)

@@ -144,8 +144,9 @@ impl WorkspaceDependencyTree {
         }
     }
 
-    pub fn all_duplicate_filenames(&self) -> HashMap<FileName, WorkspaceDependency<'_>> {
-        self.source_file_to_workspace_map
+    pub fn all_duplicate_filenames(&self) -> Vec<(FileName, WorkspaceDependency<'_>)> {
+        let mut files: Vec<_> = self
+            .source_file_to_workspace_map
             .iter()
             .filter(|(_, workspace_paths)| workspace_paths.len() > 1)
             .map(|(source_file, workspace_paths)| {
@@ -159,7 +160,9 @@ impl WorkspaceDependencyTree {
                     ),
                 )
             })
-            .collect()
+            .collect();
+        files.sort_by(|a, b| a.0.cmp(&b.0));
+        files
     }
 
     pub fn analyze_source_dependency(

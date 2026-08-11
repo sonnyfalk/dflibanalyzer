@@ -303,7 +303,7 @@ impl Workspace {
     }
 
     pub fn workspace_source_files(&self) -> Vec<SourceFile> {
-        if Options::shared().verbose {
+        if Options::current().verbose {
             println!("Scanning source files for workspace: {}", self.name());
         }
 
@@ -334,7 +334,7 @@ fn collect_source_files(dir: &Path, result: &mut Vec<PathBuf>) {
     };
     for entry in entries.flatten() {
         let path = entry.path();
-        if path.is_dir() && Options::shared().recursive_scan {
+        if path.is_dir() && Options::current().recursive_scan {
             collect_source_files(&path, result);
         } else if path
             .extension()

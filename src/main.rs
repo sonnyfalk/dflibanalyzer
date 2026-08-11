@@ -25,11 +25,16 @@ struct MissingDependency<'a> {
     dependency: WorkspaceDependency<'a>,
 }
 
-static OPTIONS: std::sync::OnceLock<Options> = std::sync::OnceLock::new();
+static CURRENT_OPTIONS: std::sync::OnceLock<Options> = std::sync::OnceLock::new();
 
 impl Options {
-    fn shared() -> &'static Options {
-        OPTIONS.get().unwrap()
+    fn init_current(current: Options) -> &'static Options {
+        _ = CURRENT_OPTIONS.set(current);
+        Self::current()
+    }
+
+    fn current() -> &'static Options {
+        CURRENT_OPTIONS.get().unwrap()
     }
 }
 
@@ -288,7 +293,7 @@ fn print_missing_dependency(
         }
     }
 
-    if Options::shared().verbose
+    if Options::current().verbose
         && let Some(source_dependencies) = tree
             .analyze_source_dependency(missing_dependency.workspace, &missing_dependency.dependency)
     {
@@ -320,9 +325,8 @@ fn print_missing_dependency(
 }
 
 fn main() -> Result<(), String> {
-    _ = OPTIONS.set(Options::parse());
+    let options = Options::init_current(Options::parse());
 
-    let options = Options::shared();
     let root_workspace = Workspace::new(&options.sws_file)?;
     if options.verbose {
         let libraries = root_workspace.all_defined_dependency_workspaces();

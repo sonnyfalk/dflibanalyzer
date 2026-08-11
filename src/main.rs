@@ -88,6 +88,7 @@ fn print_workspace_dependencies<'a>(
                     }
                     WorkspaceDependency::Ambiguous(_) => Some(dep),
                     WorkspaceDependency::Missing(_) => Some(dep),
+                    WorkspaceDependency::Reverse(_) => Some(dep),
                 }),
         )
         .collect();
@@ -108,6 +109,7 @@ fn print_workspace_dependencies<'a>(
             match dependency {
                 WorkspaceDependency::Dependency(_) => "",
                 WorkspaceDependency::Missing(_) => " (Missing)",
+                WorkspaceDependency::Reverse(_) => " (Reverse)",
                 WorkspaceDependency::Ambiguous(_) => " (Ambiguous)",
             },
         );
@@ -190,69 +192,97 @@ fn print_missing_dependency(
     tree: &WorkspaceDependencyTree,
 ) {
     println!();
-    println!("{}", missing_dependency.workspace.name());
-    println!(
-        "{} {}",
-        "└──",
-        missing_dependency
-            .dependency
-            .to_string()
-            .color(missing_dependency.dependency.color())
-    );
-    println!();
-    if let Some(dep) = missing_dependency.dependency.only_one() {
-        println!("Missing library dependency.",);
+    if matches!(
+        missing_dependency.dependency,
+        WorkspaceDependency::Reverse(_)
+    ) {
+        println!("{}", missing_dependency.dependency.to_string());
+        println!("{} {}", "└──", missing_dependency.workspace.name());
         println!(
-            "Solution: Consider adding {} as a library dependency to {}",
-            dep.name().bold(),
-            missing_dependency.workspace.name().bold()
-        )
+            "{} {}",
+            "    └──",
+            missing_dependency
+                .dependency
+                .to_string()
+                .color(missing_dependency.dependency.color())
+        );
     } else {
-        println!("Ambiguous library dependency.");
-        if let WorkspaceDependency::Dependency(df25_resolution) =
-            tree.resolve_workspace_dependency_df25(missing_dependency.dependency.clone())
-        {
-            let other = WorkspaceDependency::Ambiguous(
-                missing_dependency
-                    .dependency
-                    .all()
-                    .into_iter()
-                    .filter(|d| d.name() != df25_resolution.name())
-                    .collect(),
-            );
-            println!("DataFlex 25: {}", df25_resolution.name());
-            let indirect_dependencies =
-                tree.defined_indirect_workspace_dependencies(missing_dependency.workspace);
-
-            if other
-                .all()
-                .iter()
-                .all(|w| indirect_dependencies.contains(&w.sws_path))
+        println!("{}", missing_dependency.workspace.name());
+        println!(
+            "{} {}",
+            "└──",
+            missing_dependency
+                .dependency
+                .to_string()
+                .color(missing_dependency.dependency.color())
+        );
+    }
+    println!();
+    match missing_dependency.dependency {
+        WorkspaceDependency::Dependency(_) => {}
+        WorkspaceDependency::Missing(dep) => {
+            println!("Missing library dependency.",);
+            println!(
+                "Solution: Consider adding {} as a library dependency to {}",
+                dep.name().bold(),
+                missing_dependency.workspace.name().bold()
+            )
+        }
+        WorkspaceDependency::Reverse(dep) => {
+            println!("Reverse library dependency.",);
+            println!(
+                "Solution: Consider moving impacted files from {} up the tree to {}",
+                missing_dependency.workspace.name().bold(),
+                dep.name().bold(),
+            )
+        }
+        WorkspaceDependency::Ambiguous(_) => {
+            println!("Ambiguous library dependency.");
+            if let WorkspaceDependency::Dependency(df25_resolution) =
+                tree.resolve_workspace_dependency_df25(missing_dependency.dependency.clone())
             {
-                let is_multiple = other.all().len() > 1;
-                if is_multiple {
-                    println!(
-                        "Solution: Consider removing {} as library dependencies to {}. They're already included via indirect dependencies.",
-                        other.to_string().bold(),
-                        missing_dependency.workspace.name().bold()
-                    );
+                let other = WorkspaceDependency::Ambiguous(
+                    missing_dependency
+                        .dependency
+                        .all()
+                        .into_iter()
+                        .filter(|d| d.name() != df25_resolution.name())
+                        .collect(),
+                );
+                println!("DataFlex 25: {}", df25_resolution.name());
+                let indirect_dependencies =
+                    tree.defined_indirect_workspace_dependencies(missing_dependency.workspace);
+
+                if other
+                    .all()
+                    .iter()
+                    .all(|w| indirect_dependencies.contains(&w.sws_path))
+                {
+                    let is_multiple = other.all().len() > 1;
+                    if is_multiple {
+                        println!(
+                            "Solution: Consider removing {} as library dependencies to {}. They're already included via indirect dependencies.",
+                            other.to_string().bold(),
+                            missing_dependency.workspace.name().bold()
+                        );
+                    } else {
+                        println!(
+                            "Solution: Consider removing {} as a library dependency to {}. It's already included via indirect dependencies.",
+                            other.to_string().bold(),
+                            missing_dependency.workspace.name().bold()
+                        );
+                    }
                 } else {
                     println!(
-                        "Solution: Consider removing {} as a library dependency to {}. It's already included via indirect dependencies.",
+                        "Solution: Consider pushing down {} in the dependency tree",
                         other.to_string().bold(),
-                        missing_dependency.workspace.name().bold()
                     );
-                }
-            } else {
-                println!(
-                    "Solution: Consider pushing down {} in the dependency tree",
-                    other.to_string().bold(),
-                );
-                if missing_dependency.workspace.sws_path != tree.root_workspace().sws_path {
-                    println!(
-                        "Alternative Solution: Consider pulling up {} in the dependency tree.",
-                        df25_resolution.name().bold(),
-                    );
+                    if missing_dependency.workspace.sws_path != tree.root_workspace().sws_path {
+                        println!(
+                            "Alternative Solution: Consider pulling up {} in the dependency tree.",
+                            df25_resolution.name().bold(),
+                        );
+                    }
                 }
             }
         }

@@ -14,6 +14,7 @@ pub struct WorkspaceDependencyTree {
 pub enum WorkspaceDependency<'a> {
     Dependency(&'a Workspace),
     Missing(&'a Workspace),
+    Reverse(&'a Workspace),
     Ambiguous(Vec<&'a Workspace>),
 }
 
@@ -233,7 +234,6 @@ impl WorkspaceDependencyTree {
                             match self.resolve_workspace_dependency_df26(
                                 WorkspaceDependency::Ambiguous(workspace_dependencies),
                             ) {
-                                // FIXME: Consider indicating reverse dependencies, and/or shadowed references
                                 WorkspaceDependency::Dependency(_) => None,
                                 dep => Some(dep),
                             }
@@ -241,7 +241,16 @@ impl WorkspaceDependencyTree {
                             workspaces
                                 .first()
                                 .and_then(|p| self.workspaces.get(p))
-                                .map(|wc| WorkspaceDependency::Dependency(&wc.workspace))
+                                .map(|wc| {
+                                    if self
+                                        .defined_transitive_workspace_dependencies(&wc.workspace)
+                                        .contains(&workspace.sws_path)
+                                    {
+                                        WorkspaceDependency::Reverse(&wc.workspace)
+                                    } else {
+                                        WorkspaceDependency::Dependency(&wc.workspace)
+                                    }
+                                })
                         }
                     }
                     None => {
@@ -260,18 +269,11 @@ impl WorkspaceDependencyTree {
 }
 
 impl<'a> WorkspaceDependency<'a> {
-    pub fn only_one(&self) -> Option<&Workspace> {
-        match self {
-            Self::Dependency(dependency) => Some(dependency),
-            Self::Missing(dependency) => Some(dependency),
-            Self::Ambiguous(_) => None,
-        }
-    }
-
     pub fn all(&self) -> Vec<&'a Workspace> {
         match self {
             Self::Dependency(dependency) => vec![dependency],
             Self::Missing(dependency) => vec![dependency],
+            Self::Reverse(dependency) => vec![dependency],
             Self::Ambiguous(dependencies) => dependencies.clone(),
         }
     }
@@ -282,6 +284,7 @@ impl<'a> std::fmt::Display for WorkspaceDependency<'a> {
         match self {
             Self::Dependency(dependency) => write!(f, "{}", dependency.name()),
             Self::Missing(dependency) => write!(f, "{}", dependency.name()),
+            Self::Reverse(dependency) => write!(f, "{}", dependency.name()),
             Self::Ambiguous(dependencies) => write!(
                 f,
                 "{}",
@@ -344,8 +347,9 @@ impl<'a> Iterator for WorkspaceTreeIterator<'a> {
 impl<'a> WorkspaceDependency<'a> {
     pub fn sort_order(&self) -> usize {
         match self {
-            WorkspaceDependency::Dependency(_) => 3,
-            WorkspaceDependency::Missing(_) => 2,
+            WorkspaceDependency::Dependency(_) => 4,
+            WorkspaceDependency::Missing(_) => 3,
+            WorkspaceDependency::Reverse(_) => 2,
             WorkspaceDependency::Ambiguous(_) => 1,
         }
     }
@@ -354,6 +358,7 @@ impl<'a> WorkspaceDependency<'a> {
         match self {
             WorkspaceDependency::Dependency(_) => colored::Color::Green,
             WorkspaceDependency::Missing(_) => colored::Color::Yellow,
+            WorkspaceDependency::Reverse(_) => colored::Color::Yellow,
             WorkspaceDependency::Ambiguous(_) => colored::Color::Red,
         }
     }

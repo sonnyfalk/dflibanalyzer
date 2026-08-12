@@ -162,7 +162,7 @@ fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
         .set_content_arrangement(ContentArrangement::Dynamic)
         .set_header(vec!["File", "Resolved DF26 / DF25", "Candidate Libraries"]);
 
-    for (file, dependency) in all_duplicate_filenames {
+    for (file, dependency) in &all_duplicate_filenames {
         let file = file.to_string();
         let resolved26 = match tree.resolve_workspace_dependency_df26(dependency.clone()) {
             WorkspaceDependency::Dependency(dep) => Some(dep.name().to_string()),
@@ -190,6 +190,63 @@ fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
         ]);
     }
     println!("{table}");
+
+    if Options::current().verbose {
+        let mut table = Table::new();
+        table
+            .load_style(comfy_table::presets::UTF8_FULL.with_rounded_corners())
+            .set_content_arrangement(ContentArrangement::Dynamic)
+            .set_header(vec!["File / Workspace", "Identical", "Path"]);
+        for (file, dependency) in &all_duplicate_filenames {
+            let workspace_names: Vec<_> = dependency.all().iter().map(|dep| dep.name()).collect();
+            let file_paths: Vec<_> = dependency
+                .all()
+                .iter()
+                .filter_map(|dep| tree.source_file_in_workspace(file, dep))
+                .collect();
+            let identical = all_files_identical(&file_paths);
+            table.add_row(vec![
+                format!(
+                    "{}\n    {}",
+                    file.to_string(),
+                    workspace_names.join("\n    ")
+                )
+                .into(),
+                if identical {
+                    Cell::new("Yes").fg(Color::DarkGreen)
+                } else {
+                    Cell::new("No")
+                },
+                format!(
+                    "\n{}",
+                    file_paths
+                        .iter()
+                        .map(|p| p.to_string_lossy())
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+                .into(),
+            ]);
+        }
+        println!("{table}");
+    }
+}
+
+fn all_files_identical(files: &Vec<&PathBuf>) -> bool {
+    let Ok(entries) = files
+        .iter()
+        .map(|path| std::fs::read(path))
+        .collect::<std::io::Result<Vec<_>>>()
+    else {
+        return false;
+    };
+
+    entries.first().is_some_and(|first_content| {
+        entries
+            .iter()
+            .skip(1)
+            .all(|content| content == first_content)
+    })
 }
 
 fn print_missing_dependency(

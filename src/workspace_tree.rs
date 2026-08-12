@@ -165,6 +165,24 @@ impl WorkspaceDependencyTree {
         files
     }
 
+    pub fn source_file_in_workspace(
+        &self,
+        file: &FileName,
+        workspace: &Workspace,
+    ) -> Option<&PathBuf> {
+        self.workspaces
+            .get(&workspace.sws_path)
+            .and_then(|wc| {
+                wc.source_files.iter().find(|f| {
+                    f.path
+                        .file_name()
+                        .map(FileName::from)
+                        .is_some_and(|f| f == *file)
+                })
+            })
+            .map(|f| &f.path)
+    }
+
     pub fn analyze_source_dependency(
         &self,
         workspace: &Workspace,

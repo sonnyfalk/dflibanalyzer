@@ -107,15 +107,24 @@ fn print_workspace_dependencies<'a>(
         };
         let is_specified = matches!(dependency, WorkspaceDependency::Dependency(_));
         println!(
-            "{}{} {}{}",
+            "{}{} {}",
             prefix,
             connector,
-            dependency.to_string().color(dependency.color()),
             match dependency {
-                WorkspaceDependency::Dependency(_) => "",
-                WorkspaceDependency::Missing(_) => " (Missing)",
-                WorkspaceDependency::Reverse(_) => " (Reverse)",
-                WorkspaceDependency::Ambiguous(_) => " (Ambiguous)",
+                WorkspaceDependency::Dependency(_) =>
+                    format!("{}", dependency.to_string().color(dependency.color())),
+                WorkspaceDependency::Missing(_) =>
+                    format!("({}: {})", "Missing".color(dependency.color()), dependency),
+                WorkspaceDependency::Reverse(_) => format!(
+                    "({}: {})",
+                    "Reverse Use references".color(dependency.color()),
+                    dependency
+                ),
+                WorkspaceDependency::Ambiguous(_) => format!(
+                    "({}: {})",
+                    "Ambiguous Use references".color(dependency.color()),
+                    dependency
+                ),
             },
         );
 
@@ -254,31 +263,21 @@ fn print_missing_dependency(
     tree: &WorkspaceDependencyTree,
 ) {
     println!();
-    if matches!(
-        missing_dependency.dependency,
-        WorkspaceDependency::Reverse(_)
-    ) {
-        println!("{}", missing_dependency.dependency.to_string());
-        println!("{} {}", "└──", missing_dependency.workspace.name());
-        println!(
-            "{} {}",
-            "    └──",
-            missing_dependency
-                .dependency
-                .to_string()
-                .color(missing_dependency.dependency.color())
-        );
-    } else {
-        println!("{}", missing_dependency.workspace.name());
-        println!(
-            "{} {}",
-            "└──",
-            missing_dependency
-                .dependency
-                .to_string()
-                .color(missing_dependency.dependency.color())
-        );
-    }
+    println!("{}", missing_dependency.workspace.name());
+    println!(
+        "{} ({}: {})",
+        "└──",
+        match missing_dependency.dependency {
+            WorkspaceDependency::Dependency(_) => "".color(missing_dependency.dependency.color()),
+            WorkspaceDependency::Missing(_) =>
+                "Missing".color(missing_dependency.dependency.color()),
+            WorkspaceDependency::Reverse(_) =>
+                "Reverse Use references".color(missing_dependency.dependency.color()),
+            WorkspaceDependency::Ambiguous(_) =>
+                "Ambiguous Use references".color(missing_dependency.dependency.color()),
+        },
+        missing_dependency.dependency
+    );
     println!();
     match missing_dependency.dependency {
         WorkspaceDependency::Dependency(_) => {}
@@ -291,7 +290,7 @@ fn print_missing_dependency(
             )
         }
         WorkspaceDependency::Reverse(dep) => {
-            println!("Reverse library dependency.",);
+            println!("Reverse Use references.",);
             println!(
                 "Solution: Consider moving impacted files from {} up the tree to {}",
                 missing_dependency.workspace.name().bold(),
@@ -299,7 +298,7 @@ fn print_missing_dependency(
             )
         }
         WorkspaceDependency::Ambiguous(_) => {
-            println!("Ambiguous library dependency.");
+            println!("Ambiguous Use references.");
             if let WorkspaceDependency::Dependency(df25_resolution) =
                 tree.resolve_workspace_dependency_df25(missing_dependency.dependency.clone())
             {

@@ -18,7 +18,8 @@ Arguments:
 
 Options:
   -v, --verbose
-  -h, --help     Print help
+  -r, --recursive-scan  Scan source files in AppSrc/DdSrc recursively
+  -h, --help            Print help
 ```
 
 ## Examples
@@ -27,6 +28,6 @@ Options:
 
 ![](example1.png)
 
-#### Example workspace with missing dependencies
+#### Example workspace with file conflicts and ambiguous Use reference
 
 ![](example2.png)

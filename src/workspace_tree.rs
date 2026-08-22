@@ -16,6 +16,7 @@ pub enum WorkspaceDependency<'a> {
     Missing(&'a Workspace),
     Reverse(&'a Workspace),
     Ambiguous(Vec<&'a Workspace>),
+    Conflicting(&'a Workspace, &'a Workspace),
 }
 
 #[derive(Debug)]
@@ -78,7 +79,8 @@ impl WorkspaceDependencyTree {
         workspace: &Workspace,
     ) -> HashSet<PathBuf> {
         self.iter(workspace, IteratorStrategy::BreadthFirst)
-            .map(|w| w.sws_path.clone())
+            .flat_map(|w| w.dependencies.iter())
+            .cloned()
             .collect()
     }
 
@@ -121,26 +123,42 @@ impl WorkspaceDependencyTree {
         strategy: IteratorStrategy,
         take_first: bool,
     ) -> WorkspaceDependency<'a> {
-        let WorkspaceDependency::Ambiguous(dependencies) = dependency else {
+        let WorkspaceDependency::Ambiguous(candidates) = dependency else {
             return dependency;
         };
-        let sws_dependencies: HashSet<_> = dependencies.iter().map(|w| &w.sws_path).collect();
+        let sws_candidates: HashSet<_> = candidates.iter().map(|w| &w.sws_path).collect();
         if let Some(sibling_dependencies) = self
             .iter(self.root_workspace(), strategy)
             .map(|w| &w.dependencies)
-            .find(|dependencies| dependencies.iter().any(|p| sws_dependencies.contains(p)))
+            .find(|dependencies| dependencies.iter().any(|p| sws_candidates.contains(p)))
         {
-            let ordered_dependencies: Vec<_> = sibling_dependencies
+            let mut ordered_candidates: Vec<_> = sibling_dependencies
                 .iter()
-                .filter_map(|p| dependencies.iter().find(|w| &w.sws_path == p))
+                .filter_map(|p| candidates.iter().find(|w| &w.sws_path == p).map(|w| *w))
                 .collect();
-            if ordered_dependencies.len() == 1 || take_first {
-                WorkspaceDependency::Dependency(ordered_dependencies.first().unwrap())
+            if ordered_candidates.len() == 1 || take_first {
+                WorkspaceDependency::Dependency(ordered_candidates.first().unwrap())
             } else {
-                WorkspaceDependency::Ambiguous(dependencies)
+                let all_transitive_dependencies: HashSet<_> = ordered_candidates
+                    .iter()
+                    .flat_map(|w| {
+                        self.defined_transitive_workspace_dependencies(w)
+                            .into_iter()
+                    })
+                    .collect();
+                let transitive_candidates: Vec<_> = ordered_candidates
+                    .extract_if(.., |w| all_transitive_dependencies.contains(&w.sws_path))
+                    .collect();
+                if ordered_candidates.len() == 1 {
+                    WorkspaceDependency::Dependency(ordered_candidates.first().unwrap())
+                } else if !ordered_candidates.is_empty() {
+                    WorkspaceDependency::Ambiguous(ordered_candidates)
+                } else {
+                    WorkspaceDependency::Ambiguous(transitive_candidates)
+                }
             }
         } else {
-            WorkspaceDependency::Ambiguous(dependencies)
+            WorkspaceDependency::Ambiguous(candidates)
         }
     }
 
@@ -245,17 +263,37 @@ impl WorkspaceDependencyTree {
                             // Ambiguous workspace dependency, same file name is in multiple workspaces.
                             // Before DataFlex 26, the makepath order was depth-first,
                             // and after DataFlex 26, the makepath order is breadth-first.
-                            // For now, try to resolve the ambiguity with BFS search.
-                            // FIXME: This should check both before and after 26 behavior, compare the difference in results.
-                            let workspace_dependencies = workspaces
+                            let workspace_dependencies: Vec<_> = workspaces
                                 .iter()
                                 .filter_map(|p| self.workspaces.get(p))
                                 .map(|wc| &wc.workspace)
                                 .collect();
                             match self.resolve_workspace_dependency_df26(
-                                WorkspaceDependency::Ambiguous(workspace_dependencies),
+                                WorkspaceDependency::Ambiguous(workspace_dependencies.clone()),
                             ) {
-                                WorkspaceDependency::Dependency(_) => None,
+                                WorkspaceDependency::Dependency(df26_resolution) => {
+                                    if let WorkspaceDependency::Dependency(df25_resolution) = self
+                                        .resolve_workspace_dependency_df25(
+                                            WorkspaceDependency::Ambiguous(
+                                                workspace_dependencies.clone(),
+                                            ),
+                                        )
+                                    {
+                                        if df25_resolution.sws_path == df26_resolution.sws_path {
+                                            // They both resolve to the same, no conflict.
+                                            None
+                                        } else {
+                                            // They resolve to different libraries, flag a conflict.
+                                            Some(WorkspaceDependency::Conflicting(
+                                                df26_resolution,
+                                                df25_resolution,
+                                            ))
+                                        }
+                                    } else {
+                                        // Ambiguous by default.
+                                        Some(WorkspaceDependency::Ambiguous(workspace_dependencies))
+                                    }
+                                }
                                 dep => Some(dep),
                             }
                         } else {
@@ -296,6 +334,9 @@ impl<'a> WorkspaceDependency<'a> {
             Self::Missing(dependency) => vec![dependency],
             Self::Reverse(dependency) => vec![dependency],
             Self::Ambiguous(dependencies) => dependencies.clone(),
+            Self::Conflicting(df26_resolution, df25_resolition) => {
+                vec![df26_resolution, df25_resolition]
+            }
         }
     }
 }
@@ -315,6 +356,9 @@ impl<'a> std::fmt::Display for WorkspaceDependency<'a> {
                     .collect::<Vec<_>>()
                     .join(if f.alternate() { "\n" } else { ", " })
             ),
+            Self::Conflicting(df26_resolution, df25_resolution) => {
+                write!(f, "{} / {}", df26_resolution.name(), df25_resolution.name())
+            }
         }
     }
 }
@@ -368,9 +412,10 @@ impl<'a> Iterator for WorkspaceTreeIterator<'a> {
 impl<'a> WorkspaceDependency<'a> {
     pub fn sort_order(&self) -> usize {
         match self {
-            WorkspaceDependency::Dependency(_) => 4,
-            WorkspaceDependency::Missing(_) => 3,
-            WorkspaceDependency::Reverse(_) => 2,
+            WorkspaceDependency::Dependency(_) => 5,
+            WorkspaceDependency::Missing(_) => 4,
+            WorkspaceDependency::Reverse(_) => 3,
+            WorkspaceDependency::Conflicting(_, _) => 2,
             WorkspaceDependency::Ambiguous(_) => 1,
         }
     }
@@ -381,6 +426,7 @@ impl<'a> WorkspaceDependency<'a> {
             WorkspaceDependency::Missing(_) => colored::Color::Yellow,
             WorkspaceDependency::Reverse(_) => colored::Color::Yellow,
             WorkspaceDependency::Ambiguous(_) => colored::Color::Red,
+            WorkspaceDependency::Conflicting(_, _) => colored::Color::Red,
         }
     }
 }

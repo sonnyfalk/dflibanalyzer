@@ -94,6 +94,7 @@ fn print_workspace_dependencies<'a>(
                     WorkspaceDependency::Ambiguous(_) => Some(dep),
                     WorkspaceDependency::Missing(_) => Some(dep),
                     WorkspaceDependency::Reverse(_) => Some(dep),
+                    WorkspaceDependency::Conflicting(_, _) => Some(dep),
                 }),
         )
         .collect();
@@ -123,6 +124,11 @@ fn print_workspace_dependencies<'a>(
                 WorkspaceDependency::Ambiguous(_) => format!(
                     "({}: {})",
                     "Ambiguous Use references".color(dependency.color()),
+                    dependency
+                ),
+                WorkspaceDependency::Conflicting(_, _) => format!(
+                    "({}: {})",
+                    "Conflicting File Resolution".color(dependency.color()),
                     dependency
                 ),
             },
@@ -275,6 +281,8 @@ fn print_missing_dependency(
                 "Reverse Use references".color(missing_dependency.dependency.color()),
             WorkspaceDependency::Ambiguous(_) =>
                 "Ambiguous Use references".color(missing_dependency.dependency.color()),
+            WorkspaceDependency::Conflicting(_, _) =>
+                "Conflicting File Resolution".color(missing_dependency.dependency.color()),
         },
         missing_dependency.dependency
     );
@@ -347,14 +355,26 @@ fn print_missing_dependency(
                 }
             }
         }
+        WorkspaceDependency::Conflicting(df26_resolution, df25_resolution) => {
+            println!("Conflicting File Resolution.");
+            println!("DataFlex 25: {}", df25_resolution.name());
+            println!("DataFlex 26: {}", df26_resolution.name());
+            println!(
+                "Solution: Consider whether it's possible to push {} down in the dependency tree",
+                df26_resolution.name().bold(),
+            );
+            println!(
+                "Alternative Solution: Manually merge and resolve the source file conflicts with the same name."
+            )
+        }
     }
 
-    if Options::current().verbose
-        && let Some(source_dependencies) = tree
-            .analyze_source_dependency(missing_dependency.workspace, &missing_dependency.dependency)
+    if let Some(source_dependencies) =
+        tree.analyze_source_dependency(missing_dependency.workspace, &missing_dependency.dependency)
     {
         println!(
-            "Impacted source files: {}",
+            "Impacted source files from {}: {}",
+            missing_dependency.workspace.name().bold(),
             source_dependencies
                 .iter()
                 .filter_map(|s| s
@@ -366,7 +386,8 @@ fn print_missing_dependency(
                 .join(", ")
         );
         println!(
-            "Referenced files: {}",
+            "Referenced files found in {}: {}",
+            missing_dependency.dependency.to_string().bold(),
             source_dependencies
                 .iter()
                 .flat_map(|s| s.dependencies.iter())

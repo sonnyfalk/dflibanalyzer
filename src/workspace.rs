@@ -4,11 +4,11 @@ use std::fs::*;
 use std::path::{Path, PathBuf};
 
 use ini::*;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::Options;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct Workspace {
     pub sws_path: PathBuf,
     pub _df_version: Option<String>,

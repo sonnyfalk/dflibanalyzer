@@ -325,6 +325,22 @@ impl WorkspaceDependencyTree {
                 result
             })
     }
+
+    pub fn to_root_workspace_and_dependencies(mut self) -> (Workspace, Vec<Workspace>) {
+        let root_path = self.root_workspace_path;
+        let root_workspace = self
+            .workspaces
+            .extract_if(|p, _| *p == root_path)
+            .map(|(_, wc)| wc.workspace)
+            .next()
+            .unwrap();
+        let dependencies = self
+            .workspaces
+            .into_iter()
+            .map(|(_, wc)| wc.workspace)
+            .collect();
+        (root_workspace, dependencies)
+    }
 }
 
 impl<'a> WorkspaceDependency<'a> {

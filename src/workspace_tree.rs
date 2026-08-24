@@ -74,6 +74,10 @@ impl WorkspaceDependencyTree {
         self.workspaces.get(workspace_path).map(|w| &w.workspace)
     }
 
+    pub fn all_workspaces(&self) -> impl Iterator<Item = &Workspace> {
+        self.iter(self.root_workspace(), IteratorStrategy::BreadthFirst)
+    }
+
     pub fn defined_transitive_workspace_dependencies(
         &self,
         workspace: &Workspace,

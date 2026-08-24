@@ -179,7 +179,7 @@ fn print_workspace_dependencies<'a>(
     }
 }
 
-pub fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
+fn print_workspace_duplicate_files(tree: &WorkspaceDependencyTree) {
     use comfy_table::{Cell, Color, ContentArrangement, Table};
 
     print!("Files with same name in multiple libraries:",);

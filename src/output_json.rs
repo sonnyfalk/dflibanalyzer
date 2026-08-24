@@ -11,6 +11,8 @@ struct Output {
     dependencies: Vec<Workspace>,
     tree: DependencyNode,
     conflicting_files: Vec<ConflictingFile>,
+    errors: Vec<DependencyIssue>,
+    warnings: Vec<DependencyIssue>,
 }
 
 #[derive(Debug, Serialize)]
@@ -42,10 +44,23 @@ struct ConflictingFileCandidate {
     path: PathBuf,
 }
 
+#[derive(Debug, Serialize)]
+struct DependencyIssue {
+    description: String,
+    workspace: String,
+    related_workspaces: Vec<String>,
+    df26: Option<String>,
+    df25: Option<String>,
+    impacted_files: Vec<String>,
+    referenced_files: Vec<String>,
+    suggestions: Vec<String>,
+}
+
 pub fn analyze_and_output_json(root_workspace: Workspace) {
     let tree = WorkspaceDependencyTree::new(root_workspace);
     let json_tree = workspace_dependency_tree(&tree);
     let conflicting_files = conflicting_files(&tree);
+    let (errors, warnings) = dependency_issues(&tree);
     let (root_workspace, dependencies) = tree.to_root_workspace_and_dependencies();
     let output = Output {
         version: clap::crate_version!().into(),
@@ -53,6 +68,8 @@ pub fn analyze_and_output_json(root_workspace: Workspace) {
         dependencies: dependencies,
         tree: json_tree,
         conflicting_files: conflicting_files,
+        errors: errors,
+        warnings: warnings,
     };
     println!("{}", serde_json::to_string_pretty(&output).unwrap());
 }
@@ -166,4 +183,193 @@ fn conflicting_files(tree: &WorkspaceDependencyTree) -> Vec<ConflictingFile> {
             }
         })
         .collect()
+}
+
+fn dependency_issues(
+    tree: &WorkspaceDependencyTree,
+) -> (Vec<DependencyIssue>, Vec<DependencyIssue>) {
+    tree.all_workspaces().fold(
+        (Vec::new(), Vec::new()),
+        |(mut errors, mut warnings), workspace| {
+            let defined_dependencies = tree.defined_transitive_workspace_dependencies(workspace);
+            let calculated_dependencies = tree.calculated_workspace_dependencies(workspace);
+            for dep in calculated_dependencies {
+                match dep {
+                    WorkspaceDependency::Dependency(workspace) => {
+                        if !defined_dependencies.contains(&workspace.sws_path) {
+                            if let Some(issue) = dependency_issue(
+                                workspace,
+                                WorkspaceDependency::Missing(workspace),
+                                tree,
+                            ) {
+                                warnings.push(issue);
+                            }
+                        }
+                    }
+                    WorkspaceDependency::Ambiguous(_) => {
+                        if let Some(issue) = dependency_issue(workspace, dep, tree) {
+                            errors.push(issue);
+                        }
+                    }
+                    WorkspaceDependency::Missing(_) => {
+                        if let Some(issue) = dependency_issue(workspace, dep, tree) {
+                            warnings.push(issue);
+                        }
+                    }
+                    WorkspaceDependency::Reverse(_) => {
+                        if let Some(issue) = dependency_issue(workspace, dep, tree) {
+                            warnings.push(issue);
+                        }
+                    }
+                    WorkspaceDependency::Conflicting(_, _) => {
+                        if let Some(issue) = dependency_issue(workspace, dep, tree) {
+                            errors.push(issue);
+                        }
+                    }
+                }
+            }
+
+            (errors, warnings)
+        },
+    )
+}
+
+fn dependency_issue(
+    workspace: &Workspace,
+    dep: WorkspaceDependency,
+    tree: &WorkspaceDependencyTree,
+) -> Option<DependencyIssue> {
+    let (impacted_files, referenced_files) = tree
+        .analyze_source_dependency(workspace, &dep)
+        .map(|source_dependencies| {
+            (
+                source_dependencies
+                    .iter()
+                    .filter_map(|s| {
+                        s.path
+                            .file_name()
+                            .and_then(|s| s.to_str())
+                            .map(|s| s.to_string())
+                    })
+                    .collect::<Vec<_>>(),
+                source_dependencies
+                    .iter()
+                    .flat_map(|s| s.dependencies.iter())
+                    .collect::<HashSet<_>>()
+                    .into_iter()
+                    .map(|f| f.to_string())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .unwrap_or_default();
+
+    match dep {
+        WorkspaceDependency::Dependency(_) => None,
+        WorkspaceDependency::Missing(dep) => Some(DependencyIssue {
+            description: "Missing library dependency.".into(),
+            workspace: workspace.name().into(),
+            df26: None,
+            df25: None,
+            related_workspaces: vec![dep.name().into()],
+            impacted_files: impacted_files,
+            referenced_files: referenced_files,
+            suggestions: vec![format!(
+                "Consider adding {} as a library dependency to {}",
+                dep.name(),
+                workspace.name()
+            )],
+        }),
+        WorkspaceDependency::Reverse(dep) => Some(DependencyIssue {
+            description: "Reverse Use references.".into(),
+            workspace: workspace.name().into(),
+            related_workspaces: vec![dep.name().into()],
+            df26: None,
+            df25: None,
+            impacted_files: impacted_files,
+            referenced_files: referenced_files,
+            suggestions: vec![format!(
+                "Consider moving impacted files from {} up the tree to {}",
+                workspace.name(),
+                dep.name(),
+            )],
+        }),
+        WorkspaceDependency::Ambiguous(ref candidates) => {
+            let indirect_dependencies = tree.defined_indirect_workspace_dependencies(workspace);
+            let df25_resolution = match tree.resolve_workspace_dependency_df25(dep.clone()) {
+                WorkspaceDependency::Dependency(df25_resolution) => Some(df25_resolution),
+                _ => None,
+            };
+            let other = WorkspaceDependency::Ambiguous(
+                dep.all()
+                    .into_iter()
+                    .filter(|d| {
+                        df25_resolution
+                            .map(|df25| d.name() != df25.name())
+                            .unwrap_or(true)
+                    })
+                    .collect(),
+            );
+            let suggestion = if other
+                .all()
+                .iter()
+                .all(|w| indirect_dependencies.contains(&w.sws_path))
+            {
+                let is_multiple = other.all().len() > 1;
+                if is_multiple {
+                    format!(
+                        "Consider removing {} as library dependencies to {}. They're already included via indirect dependencies.",
+                        other.to_string(),
+                        workspace.name()
+                    )
+                } else {
+                    format!(
+                        "Consider removing {} as a library dependency to {}. It's already included via indirect dependencies.",
+                        other.to_string(),
+                        workspace.name()
+                    )
+                }
+            } else {
+                format!(
+                    "Consider pushing down {} in the dependency tree",
+                    other.to_string(),
+                )
+            };
+            Some(DependencyIssue {
+                description: "Ambiguous Use references.".into(),
+                workspace: workspace.name().into(),
+                related_workspaces: candidates
+                    .into_iter()
+                    .map(|w| w.name().to_string())
+                    .collect(),
+                df26: Some("(Unresolved)".into()),
+                df25: df25_resolution.map(|df25| df25.name().into()),
+                impacted_files: impacted_files,
+                referenced_files: referenced_files,
+                suggestions: vec![suggestion],
+            })
+        }
+        WorkspaceDependency::Conflicting(df26_resolution, df25_resolution) => {
+            Some(DependencyIssue {
+                description: "Conflicting File Resolution.".into(),
+                workspace: workspace.name().into(),
+                related_workspaces: vec![
+                    df26_resolution.name().into(),
+                    df25_resolution.name().into(),
+                ],
+                df26: Some(df26_resolution.name().into()),
+                df25: Some(df25_resolution.name().into()),
+                impacted_files: impacted_files,
+                referenced_files: referenced_files,
+                suggestions: vec![
+                    format!(
+                        "Consider whether it's possible to push {} down in the dependency tree",
+                        df26_resolution.name(),
+                    ),
+                    format!(
+                        "Manually merge and resolve the source file conflicts with the same name."
+                    ),
+                ],
+            })
+        }
+    }
 }

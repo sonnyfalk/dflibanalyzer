@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use serde::Serialize;
 
@@ -42,6 +42,7 @@ struct ConflictingFile {
 struct ConflictingFileCandidate {
     workspace: String,
     path: PathBuf,
+    group: usize,
 }
 
 #[derive(Debug, Serialize)]
@@ -155,16 +156,21 @@ fn conflicting_files(tree: &WorkspaceDependencyTree) -> Vec<ConflictingFile> {
     all_duplicate_filenames
         .into_iter()
         .map(|(file, dependency)| {
-            let candidates = dependency
+            let candidates: Vec<_> = dependency
                 .all()
                 .into_iter()
                 .filter_map(|candidate| {
-                    tree.source_file_in_workspace(&file, candidate).map(|p| {
-                        ConflictingFileCandidate {
-                            workspace: candidate.name().to_string(),
-                            path: p.clone(),
-                        }
-                    })
+                    tree.source_file_in_workspace(&file, candidate)
+                        .map(|p| (candidate, p))
+                })
+                .collect();
+            let groups = group_identical_files(candidates.iter().map(|(_, p)| *p));
+            let candidates: Vec<_> = candidates
+                .into_iter()
+                .map(|(workspace, path)| ConflictingFileCandidate {
+                    workspace: workspace.name().into(),
+                    path: path.clone(),
+                    group: groups[path],
                 })
                 .collect();
             let resolved26 = match tree.resolve_workspace_dependency_df26(dependency.clone()) {
@@ -182,6 +188,34 @@ fn conflicting_files(tree: &WorkspaceDependencyTree) -> Vec<ConflictingFile> {
                 df25: resolved25.unwrap_or("(Unresolved)".into()),
             }
         })
+        .collect()
+}
+
+fn group_identical_files<'a>(
+    files: impl Iterator<Item = &'a PathBuf>,
+) -> HashMap<&'a PathBuf, usize> {
+    let mut entries: Vec<_> = files
+        .map(|path| {
+            std::fs::read(path)
+                .map_err(|_| path)
+                .map(|bytes| (path, bytes))
+        })
+        .collect::<Vec<_>>();
+
+    let error_files: Vec<_> = entries
+        .extract_if(.., |entry| entry.is_err())
+        .map(|entry| entry.unwrap_err())
+        .collect();
+
+    let mut entries: Vec<_> = entries.into_iter().map(|entry| entry.unwrap()).collect();
+    entries.sort_by(|a, b| a.1.cmp(&b.1));
+
+    entries
+        .chunk_by(|a, b| a.1 == b.1)
+        .map(|chunk| chunk.iter().map(|entry| entry.0).collect::<Vec<_>>())
+        .chain(error_files.into_iter().map(|entry| vec![entry]))
+        .enumerate()
+        .flat_map(|(index, group)| group.into_iter().map(move |p| (p, index)))
         .collect()
 }
 

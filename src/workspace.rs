@@ -9,6 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::Options;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct Workspace {
     pub sws_path: PathBuf,
     pub _df_version: Option<String>,

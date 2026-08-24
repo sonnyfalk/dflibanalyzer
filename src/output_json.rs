@@ -5,6 +5,7 @@ use serde::Serialize;
 use super::*;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct Output {
     version: String,
     root_workspace: Workspace,
@@ -16,6 +17,7 @@ struct Output {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DependencyNode {
     name: String,
     #[serde(skip_serializing_if = "Vec::is_empty")]
@@ -31,6 +33,7 @@ struct DependencyNode {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ConflictingFile {
     name: String,
     candidates: Vec<ConflictingFileCandidate>,
@@ -39,6 +42,7 @@ struct ConflictingFile {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct ConflictingFileCandidate {
     workspace: String,
     path: PathBuf,
@@ -46,6 +50,7 @@ struct ConflictingFileCandidate {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct DependencyIssue {
     description: String,
     workspace: String,
@@ -202,7 +207,7 @@ fn group_identical_files<'a>(
         })
         .collect::<Vec<_>>();
 
-    let error_files: Vec<_> = entries
+    let error_entries: Vec<_> = entries
         .extract_if(.., |entry| entry.is_err())
         .map(|entry| entry.unwrap_err())
         .collect();
@@ -213,7 +218,7 @@ fn group_identical_files<'a>(
     entries
         .chunk_by(|a, b| a.1 == b.1)
         .map(|chunk| chunk.iter().map(|entry| entry.0).collect::<Vec<_>>())
-        .chain(error_files.into_iter().map(|entry| vec![entry]))
+        .chain(error_entries.into_iter().map(|entry| vec![entry]))
         .enumerate()
         .flat_map(|(index, group)| group.into_iter().map(move |p| (p, index)))
         .collect()

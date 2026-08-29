@@ -22,6 +22,9 @@ struct Options {
     /// Scan source files in AppSrc/DdSrc recursively.
     #[arg(short, long, action)]
     recursive_scan: bool,
+    /// Scan files in Bitmaps paths in addition to AppSrc and DdSrc.
+    #[arg(long, action)]
+    scan_bitmap_path: bool,
     /// Comma separated list of additional file extensions. e.g. `--extensions frm,mnu`.
     #[arg(long, value_delimiter = ',', value_parser = parse_extension)]
     extensions: Vec<String>,

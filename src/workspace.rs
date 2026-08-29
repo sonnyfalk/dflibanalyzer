@@ -15,6 +15,7 @@ pub struct Workspace {
     pub _df_version: Option<String>,
     pub appsrc_path: Vec<PathBuf>,
     pub ddsrc_path: Vec<PathBuf>,
+    pub bitmap_path: Vec<PathBuf>,
     pub dependencies: Vec<PathBuf>,
 }
 
@@ -29,6 +30,7 @@ struct JsonWorkspaceFile {
 struct JsonWorkspacePaths {
     app_src: Option<serde_json::Value>,
     dd_src: Option<serde_json::Value>,
+    bitmap: Option<serde_json::Value>,
 }
 
 #[derive(Debug)]
@@ -104,6 +106,29 @@ impl Workspace {
                     }
                 })
                 .collect();
+            let bitmap_paths: Vec<_> = workspace_file
+                .paths
+                .as_ref()
+                .and_then(|paths| paths.bitmap.as_ref())
+                .map(|value| match value {
+                    serde_json::Value::String(s) => vec![PathBuf::from(s)],
+                    serde_json::Value::Array(array) => array
+                        .iter()
+                        .filter_map(|v| v.as_str())
+                        .map(PathBuf::from)
+                        .collect(),
+                    _ => Vec::new(),
+                })
+                .into_iter()
+                .flat_map(|v| v.into_iter())
+                .filter_map(|p| {
+                    if p.is_relative() {
+                        std::path::absolute(root_folder.join(p)).ok()
+                    } else {
+                        Some(p)
+                    }
+                })
+                .collect();
             let dependencies: Vec<_> = workspace_file
                 .dependencies
                 .iter()
@@ -132,6 +157,11 @@ impl Workspace {
                     ddsrc_paths
                 } else {
                     vec![root_folder.join("DdSrc")]
+                },
+                bitmap_path: if !bitmap_paths.is_empty() {
+                    bitmap_paths
+                } else {
+                    vec![root_folder.join("Bitmaps")]
                 },
                 dependencies,
             })
@@ -254,11 +284,32 @@ impl Workspace {
                         }
                     })
                     .collect();
+                let bitmap_path = section
+                    .get("BitmapPath")
+                    .iter()
+                    .flat_map(|p| p.split(';'))
+                    .map(PathBuf::from)
+                    .filter_map(|p| {
+                        if p.is_relative() {
+                            std::path::absolute(home.join(&p)).ok()
+                        } else if p.is_absolute() {
+                            Some(p)
+                        } else {
+                            eprintln!(
+                                "Warning: Unrecognized path '{}' while processing '{}'",
+                                p.to_string_lossy(),
+                                config_path.to_string_lossy()
+                            );
+                            None
+                        }
+                    })
+                    .collect();
                 Ok(Workspace {
                     sws_path: sws_file.clone(),
                     _df_version: df_version.map(String::from),
                     appsrc_path: appsrc_path,
                     ddsrc_path: ddsrc_path,
+                    bitmap_path: bitmap_path,
                     dependencies: libraries,
                 })
             } else {
@@ -267,6 +318,7 @@ impl Workspace {
                     _df_version: df_version.map(String::from),
                     appsrc_path: vec![root_folder.join("AppSrc")],
                     ddsrc_path: vec![root_folder.join("DdSrc")],
+                    bitmap_path: vec![root_folder.join("Bitmaps")],
                     dependencies: libraries,
                 })
             }
@@ -309,9 +361,15 @@ impl Workspace {
         }
 
         let mut visited_paths: HashSet<PathBuf> = HashSet::new();
+        let bitmap_paths = if Options::current().scan_bitmap_path {
+            &self.bitmap_path
+        } else {
+            &vec![]
+        };
         self.appsrc_path
             .iter()
             .chain(self.ddsrc_path.iter())
+            .chain(bitmap_paths.iter())
             .filter(|&p| visited_paths.insert(p.clone()))
             .fold(Vec::new(), |mut result, dir| {
                 collect_source_files(dir, &mut result);

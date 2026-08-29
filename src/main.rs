@@ -22,9 +22,16 @@ struct Options {
     /// Scan source files in AppSrc/DdSrc recursively.
     #[arg(short, long, action)]
     recursive_scan: bool,
+    /// Comma separated list of additional file extensions. e.g. `--extensions frm,mnu`.
+    #[arg(long, value_delimiter = ',', value_parser = parse_extension)]
+    extensions: Vec<String>,
 }
 
 static CURRENT_OPTIONS: std::sync::OnceLock<Options> = std::sync::OnceLock::new();
+
+fn parse_extension(ext: &str) -> Result<String, String> {
+    Ok(ext.trim().trim_start_matches('.').to_lowercase())
+}
 
 impl Options {
     fn init_current(current: Options) -> &'static Options {

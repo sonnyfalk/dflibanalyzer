@@ -340,11 +340,11 @@ fn collect_source_files(dir: &Path, result: &mut Vec<PathBuf>) {
         } else if path
             .extension()
             .and_then(|ext| ext.to_str())
-            .is_some_and(|ext| {
-                matches!(
-                    ext.to_ascii_lowercase().as_str(),
-                    "pkg" | "vw" | "wo" | "sl" | "dd" | "src" | "dg" | "bp" | "rv" | "fd" | "inc"
-                )
+            .is_some_and(|ext| match ext.to_ascii_lowercase().as_str() {
+                "pkg" | "vw" | "wo" | "sl" | "dd" | "src" | "dg" | "bp" | "rv" | "fd" | "inc" => {
+                    true
+                }
+                ext => Options::current().extensions.iter().any(|e| e == ext),
             })
         {
             result.push(path);
@@ -359,6 +359,11 @@ fn source_file_dependencies(path: &Path) -> Result<Vec<FileName>, String> {
             path.to_string_lossy()
         )
     })?;
+
+    if bytes.contains(&0) {
+        // Might be binary - skip scanning.
+        return Ok(vec![]);
+    }
 
     let os_content = unsafe { OsString::from_encoded_bytes_unchecked(bytes) };
     let content = os_content.to_string_lossy();

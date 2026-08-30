@@ -33,7 +33,11 @@ struct Options {
 static CURRENT_OPTIONS: std::sync::OnceLock<Options> = std::sync::OnceLock::new();
 
 fn parse_extension(ext: &str) -> Result<String, String> {
-    Ok(ext.trim().trim_start_matches('.').to_lowercase())
+    Ok(ext
+        .trim()
+        .trim_start_matches('*')
+        .trim_start_matches('.')
+        .to_lowercase())
 }
 
 impl Options {

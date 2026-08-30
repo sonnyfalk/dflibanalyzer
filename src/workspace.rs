@@ -356,7 +356,7 @@ impl Workspace {
     }
 
     pub fn workspace_source_files(&self) -> Vec<SourceFile> {
-        if Options::current().verbose {
+        if Options::current().verbose && !Options::current().json {
             println!("Scanning source files for workspace: {}", self.name());
         }
 

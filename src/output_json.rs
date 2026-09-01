@@ -57,8 +57,8 @@ struct DependencyIssue {
     related_workspaces: Vec<String>,
     df26: Option<String>,
     df25: Option<String>,
-    impacted_files: Vec<String>,
-    referenced_files: Vec<String>,
+    impacted_files: Vec<PathBuf>,
+    referenced_files: Vec<PathBuf>,
     suggestions: Vec<String>,
 }
 
@@ -284,19 +284,15 @@ fn dependency_issue(
             (
                 source_dependencies
                     .iter()
-                    .filter_map(|s| {
-                        s.path
-                            .file_name()
-                            .and_then(|s| s.to_str())
-                            .map(|s| s.to_string())
-                    })
+                    .map(|s| &s.path)
+                    .cloned()
                     .collect::<Vec<_>>(),
                 source_dependencies
                     .iter()
                     .flat_map(|s| s.dependencies.iter())
+                    .cloned()
                     .collect::<HashSet<_>>()
                     .into_iter()
-                    .map(|f| f.to_string())
                     .collect::<Vec<_>>(),
             )
         })
@@ -310,8 +306,12 @@ fn dependency_issue(
             df26: None,
             df25: None,
             related_workspaces: vec![dep.name().into()],
-            impacted_files: impacted_files,
-            referenced_files: referenced_files,
+            impacted_files,
+            referenced_files: referenced_files
+                .into_iter()
+                .filter_map(|f| tree.source_file_in_workspace(&f, dep))
+                .cloned()
+                .collect(),
             suggestions: vec![format!(
                 "Consider adding {} as a library dependency to {}",
                 dep.name(),
@@ -324,8 +324,12 @@ fn dependency_issue(
             related_workspaces: vec![dep.name().into()],
             df26: None,
             df25: None,
-            impacted_files: impacted_files,
-            referenced_files: referenced_files,
+            impacted_files,
+            referenced_files: referenced_files
+                .into_iter()
+                .filter_map(|f| tree.source_file_in_workspace(&f, dep))
+                .cloned()
+                .collect(),
             suggestions: vec![format!(
                 "Consider moving impacted files from {} up the tree to {}",
                 workspace.name(),
@@ -382,12 +386,21 @@ fn dependency_issue(
                     .collect(),
                 df26: Some("(Unresolved)".into()),
                 df25: df25_resolution.map(|df25| df25.name().into()),
-                impacted_files: impacted_files,
-                referenced_files: referenced_files,
+                impacted_files,
+                referenced_files: referenced_files
+                    .into_iter()
+                    .flat_map(|f| {
+                        candidates
+                            .iter()
+                            .filter_map(move |dep| tree.source_file_in_workspace(&f, dep))
+                    })
+                    .cloned()
+                    .collect(),
                 suggestions: vec![suggestion],
             })
         }
         WorkspaceDependency::Conflicting(df26_resolution, df25_resolution) => {
+            let candidates = [df26_resolution, df25_resolution];
             Some(DependencyIssue {
                 description: "Conflicting File Resolution.".into(),
                 workspace: workspace.name().into(),
@@ -397,8 +410,16 @@ fn dependency_issue(
                 ],
                 df26: Some(df26_resolution.name().into()),
                 df25: Some(df25_resolution.name().into()),
-                impacted_files: impacted_files,
-                referenced_files: referenced_files,
+                impacted_files,
+                referenced_files: referenced_files
+                    .into_iter()
+                    .flat_map(|f| {
+                        candidates
+                            .iter()
+                            .filter_map(move |dep| tree.source_file_in_workspace(&f, dep))
+                    })
+                    .cloned()
+                    .collect(),
                 suggestions: vec![
                     format!(
                         "Consider whether it's possible to push {} down in the dependency tree",

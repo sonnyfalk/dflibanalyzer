@@ -62,7 +62,7 @@ struct DependencyIssue {
     suggestions: Vec<String>,
 }
 
-pub fn analyze_and_output_json(root_workspace: Workspace) {
+pub fn analyze_and_output_json(root_workspace: Workspace, output_file: &mut impl std::io::Write) {
     let tree = WorkspaceDependencyTree::new(root_workspace);
     let json_tree = workspace_dependency_tree(&tree);
     let conflicting_files = conflicting_files(&tree);
@@ -77,7 +77,12 @@ pub fn analyze_and_output_json(root_workspace: Workspace) {
         errors: errors,
         warnings: warnings,
     };
-    println!("{}", serde_json::to_string_pretty(&output).unwrap());
+
+    _ = writeln!(
+        output_file,
+        "{}",
+        serde_json::to_string_pretty(&output).unwrap()
+    );
 }
 
 fn workspace_dependency_tree(tree: &WorkspaceDependencyTree) -> DependencyNode {

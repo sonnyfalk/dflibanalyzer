@@ -16,9 +16,9 @@ struct Options {
     sws_file: PathBuf,
     #[arg(short, long, action)]
     verbose: bool,
-    /// Output structured json instead of human readable text.
-    #[arg(short, long, action)]
-    json: bool,
+    /// Output structured json to the specified file instead of human readable text.
+    #[arg(short, long, value_name = "json-file-path")]
+    json: Option<PathBuf>,
     /// Scan source files in AppSrc/DdSrc recursively.
     #[arg(short, long, action)]
     recursive_scan: bool,
@@ -55,8 +55,9 @@ fn main() -> Result<(), String> {
     let options = Options::init_current(Options::parse());
     let root_workspace = Workspace::new(&options.sws_file)?;
 
-    if options.json {
-        output_json::analyze_and_output_json(root_workspace);
+    if let Some(output_file) = options.json.as_ref() {
+        let mut file = std::fs::File::create(output_file).map_err(|e| e.to_string())?;
+        output_json::analyze_and_output_json(root_workspace, &mut file);
     } else {
         output_text::analyze_and_output_text(root_workspace);
     }
